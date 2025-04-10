@@ -2,6 +2,7 @@ import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell } from 'ele
 import * as path from 'path';
 import Store from 'electron-store';
 import * as fs from 'fs';
+import { createCanvas } from 'canvas';
 import { pydtApi, PYDTUser, PYDTGame, SteamProfile } from '../shared/api';
 
 interface AppState {
@@ -79,26 +80,26 @@ function createInputWindow(title: string, message: string): Promise<string | nul
   });
 }
 
-function createTrayIcon() {
-  const iconPath = path.join(__dirname, '..', '..', 'assets', 'tray-icon.png');
-  
-  // Create a red square icon
+function createTrayIcon(isMyTurn: boolean = false) {
   const size = 16;
-  const imageData = new Uint8Array(size * size * 4);
-  for (let i = 0; i < imageData.length; i += 4) {
-    imageData[i] = 255;   // R (red)
-    imageData[i + 1] = 0; // G
-    imageData[i + 2] = 0; // B
-    imageData[i + 3] = 255; // A (fully opaque)
-  }
+  const canvas = createCanvas(size, size);
+  const ctx = canvas.getContext('2d');
   
-  const icon = nativeImage.createFromBuffer(Buffer.from(imageData), {
-    width: size,
-    height: size
-  });
-  
-  // Save the icon to a file
-  fs.writeFileSync(iconPath, icon.toPNG());
+  // Draw background
+  ctx.fillStyle = isMyTurn ? '#ff0000' : '#006400'; // Red if my turn, dark green if not
+  ctx.fillRect(0, 0, size, size);
+
+  // Draw "VI" text
+  ctx.fillStyle = '#ffffff'; // White text
+  ctx.font = 'bold 10px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VI', size/2, size/2);
+
+  // Save to file
+  const iconPath = path.join(__dirname, '..', '..', 'assets', 'tray-icon.png');
+  const buffer = canvas.toBuffer('image/png');
+  fs.writeFileSync(iconPath, buffer);
   
   return iconPath;
 }
@@ -391,6 +392,16 @@ async function updateTrayMenu() {
         console.error('Error fetching games:', error);
       }
     }
+
+    // Check if any in-progress games are waiting for current user's turn
+    const isMyTurn = games.some(game => 
+      game.inProgress && 
+      game.currentPlayerSteamId === selectedToken
+    );
+
+    // Update tray icon based on turn status
+    const iconPath = createTrayIcon(isMyTurn);
+    tray.setImage(iconPath);
 
     const contextMenu = Menu.buildFromTemplate([
       {
