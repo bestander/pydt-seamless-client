@@ -1,13 +1,20 @@
-import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain } from 'electron';
+import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'path';
 import Store from 'electron-store';
 
 interface AppState {
   token?: string;
   selectedUser?: string;
+  users: string[];
+  games: string[];
 }
 
-const store = new Store<AppState>();
+const store = new Store<AppState>({
+  defaults: {
+    users: [],
+    games: []
+  }
+});
 
 let tray: Tray | null = null;
 
@@ -65,32 +72,24 @@ function createInputWindow(title: string, message: string): Promise<string | nul
 
 function createTray() {
   try {
-    // Create a simple icon programmatically
-    const iconSize = 16;
+    // Create a simple blue square icon
+    const size = 16;
     const icon = nativeImage.createEmpty();
     
-    // Create a canvas to draw the icon
-    const { createCanvas } = require('canvas');
-    const canvas = createCanvas(iconSize, iconSize);
-    const ctx = canvas.getContext('2d');
+    // Create a simple blue square
+    const blueSquare = Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+      0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x60, 0x00, 0x00, 0x00,
+      0x02, 0x00, 0x01, 0x4A, 0x90, 0xE2, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42,
+      0x60, 0x82
+    ]);
     
-    // Draw a blue background
-    ctx.fillStyle = '#4A90E2';
-    ctx.fillRect(0, 0, iconSize, iconSize);
-    
-    // Draw white text with smaller font
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 8px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('P', iconSize / 2, iconSize / 2);
-    
-    // Convert canvas to image
-    const buffer = canvas.toBuffer('image/png');
-    const image = nativeImage.createFromBuffer(buffer);
+    const fallbackIcon = nativeImage.createFromBuffer(blueSquare);
+    const resizedIcon = fallbackIcon.resize({ width: size, height: size });
     
     // Create the tray
-    tray = new Tray(image);
+    tray = new Tray(resizedIcon);
     console.log('Tray created successfully');
     
     // Set a tooltip
@@ -100,30 +99,29 @@ function createTray() {
     updateTrayMenu();
   } catch (error) {
     console.error('Error creating tray:', error);
-    
-    // Fallback to a simple colored icon if canvas fails
-    try {
-      // Create a simple 1x1 pixel image with blue color
-      const icon = nativeImage.createEmpty();
-      const size = 16;
-      
-      // Create a simple blue square
-      const blueSquare = Buffer.from([
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x60, 0x00, 0x00, 0x00,
-        0x02, 0x00, 0x01, 0x4A, 0x90, 0xE2, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42,
-        0x60, 0x82
-      ]);
-      
-      const fallbackIcon = nativeImage.createFromBuffer(blueSquare);
-      const resizedIcon = fallbackIcon.resize({ width: size, height: size });
-      
-      tray = new Tray(resizedIcon);
-      tray.setToolTip('PYDT Super Client');
+  }
+}
+
+async function addUser() {
+  const result = await createInputWindow('Add User', 'Enter username:');
+  if (result) {
+    const users = store.get('users', []);
+    if (!users.includes(result)) {
+      users.push(result);
+      store.set('users', users);
       updateTrayMenu();
-    } catch (fallbackError) {
-      console.error('Fallback icon creation failed:', fallbackError);
+    }
+  }
+}
+
+async function addGame() {
+  const result = await createInputWindow('Add Game', 'Enter game name:');
+  if (result) {
+    const games = store.get('games', []);
+    if (!games.includes(result)) {
+      games.push(result);
+      store.set('games', games);
+      updateTrayMenu();
     }
   }
 }
@@ -135,33 +133,56 @@ function updateTrayMenu() {
   }
 
   try {
-    const token = store.get('token');
-    const selectedUser = store.get('selectedUser');
+    const users = store.get('users', []);
+    const games = store.get('games', []);
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: token ? 'Token: ' + token.substring(0, 8) + '...' : 'Add Token',
-        click: async () => {
-          if (!token) {
-            const result = await createInputWindow('Add Token', 'Please enter your PYDT token:');
-            if (result) {
-              store.set('token', result);
+        label: 'Users',
+        submenu: [
+          ...users.map(user => ({
+            label: user,
+            click: () => {
+              store.set('selectedUser', user);
               updateTrayMenu();
             }
+          })),
+          { type: 'separator' },
+          {
+            label: 'Manage Users',
+            click: addUser
           }
+        ]
+      },
+      {
+        label: 'Games',
+        submenu: [
+          ...games.map(game => ({
+            label: game,
+            click: () => {
+              // TODO: Implement game selection
+              console.log('Selected game:', game);
+            }
+          })),
+          { type: 'separator' },
+          {
+            label: 'Add Game',
+            click: addGame
+          }
+        ]
+      },
+      { type: 'separator' },
+      {
+        label: 'Open PYDT',
+        click: () => {
+          shell.openExternal('https://playyourdamnturn.com');
         }
       },
       {
-        label: selectedUser ? `User: ${selectedUser}` : 'Choose User',
-        enabled: !!token,
-        click: async () => {
-          if (token) {
-            const result = await createInputWindow('Choose User', 'Please enter your username:');
-            if (result) {
-              store.set('selectedUser', result);
-              updateTrayMenu();
-            }
-          }
+        label: 'Refresh',
+        click: () => {
+          // TODO: Implement refresh functionality
+          console.log('Refreshing...');
         }
       },
       { type: 'separator' },

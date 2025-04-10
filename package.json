@@ -7,14 +7,12 @@
     "start": "electron .",
     "dev": "tsc && electron .",
     "build": "tsc && electron-builder",
-    "watch": "tsc -w",
-    "postinstall": "npm run create-icon"
+    "watch": "tsc -w"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.24",
-    "canvas": "^3.1.0",
     "electron": "^29.1.0",
     "electron-builder": "^24.12.0",
     "typescript": "^5.3.3"
@@ -32,8 +30,7 @@
     },
     "files": [
       "dist/**/*",
-      "package.json",
-      "assets/**/*"
+      "package.json"
     ]
   }
 }
