@@ -396,8 +396,8 @@ async function updateTrayMenu() {
       {
         label: 'Games',
         submenu: [
-          ...(games.length > 0 
-            ? games.map(game => {
+          ...(games.filter(game => game.inProgress).length > 0 
+            ? games.filter(game => game.inProgress).map(game => {
                 const currentPlayer = playerProfiles[game.currentPlayerSteamId];
                 const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
                 return {
