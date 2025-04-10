@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
 import Store from 'electron-store';
-import { pydtApi, PYDTUser } from '../shared/api';
+import { pydtApi, PYDTUser } from './api';
 
 interface AppState {
   tokens: { [name: string]: string };  // name -> token mapping

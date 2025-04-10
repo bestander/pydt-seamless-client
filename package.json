@@ -2,7 +2,7 @@
   "name": "pydt-super-client",
   "version": "1.0.0",
   "description": "Desktop application for PYDT integration",
-  "main": "dist/main/main.js",
+  "main": "dist/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "tsc && electron .",

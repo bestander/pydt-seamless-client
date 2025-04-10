@@ -2,8 +2,8 @@ import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell } from 'ele
 import * as path from 'path';
 import * as fs from 'fs';
 import { createCanvas } from 'canvas';
-import { pydtApi, PYDTGame, SteamProfile } from '../shared/api';
-import { addUser, refreshUserData, getStore } from './accountManager';
+import { pydtApi, PYDTGame, SteamProfile } from './api';
+import { addUser, getStore, refreshUserData } from './account';
 
 let tray: Tray | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
@@ -25,7 +25,7 @@ function createTrayIcon(isMyTurn: boolean = false) {
   ctx.fillText('VI', size/2, size/2);
 
   // Save to file
-  const iconPath = path.join(__dirname, '..', '..', 'assets', 'tray-icon.png');
+  const iconPath = path.join(__dirname,  '..', 'assets', 'tray-icon.png');
   const buffer = canvas.toBuffer('image/png');
   fs.writeFileSync(iconPath, buffer);
   
