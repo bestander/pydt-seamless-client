@@ -95,7 +95,7 @@ export class PYDTApi {
   }
 
   async getUserData(): Promise<any> {
-    return this.request('/user');
+    return this.request('/user/getCurrent');
   }
 
   async getGames(): Promise<PYDTGame[]> {

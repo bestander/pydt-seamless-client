@@ -288,7 +288,32 @@ async function addUser() {
       }
       
       updateTrayMenu();
-      win.reload();
+
+      // Check if window exists and is not destroyed before updating
+      if (win && !win.isDestroyed()) {
+        const accountsList = Object.keys(tokens).map(username => `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
+            <span>${username}</span>
+            <button onclick="removeUser('${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">×</button>
+          </div>
+        `).join('') || '<div style="color: #666;">No accounts saved yet</div>';
+
+        win.webContents.executeJavaScript(`
+          const savedAccountsSection = document.querySelector('.section:nth-child(2)');
+          if (savedAccountsSection) {
+            const content = savedAccountsSection.querySelector('div:not(.section-title)');
+            if (content) {
+              content.innerHTML = \`${accountsList}\`;
+            }
+          }
+        `).catch(err => {
+          console.error('Error updating window:', err);
+          // If the update fails, reload the window as a fallback
+          if (win && !win.isDestroyed()) {
+            win.reload();
+          }
+        });
+      }
     });
 
     win.on('closed', () => {
@@ -369,24 +394,6 @@ async function updateTrayMenu() {
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'PYDT Accounts',
-        submenu: [
-          ...Object.keys(tokens).map(name => ({
-            label: name,
-            click: async () => {
-              store.set('selectedToken', name);
-              await refreshUserData(name);
-              updateTrayMenu();
-            }
-          })),
-          { type: 'separator' },
-          {
-            label: 'Add Account',
-            click: addUser
-          }
-        ]
-      },
-      {
         label: 'Games',
         submenu: [
           ...(games.length > 0 
@@ -404,17 +411,7 @@ async function updateTrayMenu() {
                 label: 'No games available',
                 enabled: false
               }]
-          ),
-          { type: 'separator' },
-          {
-            label: 'Refresh Games',
-            click: async () => {
-              if (selectedToken) {
-                await refreshUserData(selectedToken);
-                updateTrayMenu();
-              }
-            }
-          }
+          )
         ]
       },
       { type: 'separator' },
@@ -423,6 +420,10 @@ async function updateTrayMenu() {
         click: () => {
           shell.openExternal('https://playyourdamnturn.com');
         }
+      },
+      {
+        label: 'Manage Accounts',
+        click: addUser
       },
       {
         label: 'Refresh All',
