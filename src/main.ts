@@ -25,7 +25,7 @@ function createTrayIcon(isMyTurn: boolean = false) {
   ctx.fillText('VI', size/2, size/2);
 
   // Save to file
-  const iconPath = path.join(__dirname,  '..', 'assets', 'tray-icon.png');
+  const iconPath = path.join(__dirname, '..', 'assets', 'tray-icon.png');
   const buffer = canvas.toBuffer('image/png');
   fs.writeFileSync(iconPath, buffer);
   
@@ -59,29 +59,55 @@ async function updateTrayMenu() {
   try {
     const store = getStore();
     const tokens = store.get('tokens', {});
-    const selectedToken = store.get('selectedToken');
-
-    // Fetch games if a token is selected
-    let games: PYDTGame[] = [];
+    
+    // Fetch games for all profiles
+    let allGames: PYDTGame[] = [];
     let playerProfiles: { [steamId: string]: SteamProfile } = {};
     
-    if (selectedToken && tokens[selectedToken]) {
+    // Fetch games for each token
+    for (const [username, token] of Object.entries(tokens)) {
       try {
-        pydtApi.setToken(tokens[selectedToken]);
+        pydtApi.setToken(token);
         
         // If we have a poll URL, use it, otherwise do a full games fetch
+        let games: PYDTGame[] = [];
         if (pollInterval === null) {
-          games = await pydtApi.getGames();
-          console.log('Fetched games:', games);
+          const response = await pydtApi.getGames();
+          console.log(`Raw response from getGames for ${username}:`, response);
+          if (Array.isArray(response)) {
+            games = response;
+          } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
+            games = (response as any).data;
+          } else {
+            console.error(`Unexpected response format from getGames for ${username}:`, response);
+            continue;
+          }
+          console.log(`Fetched games for ${username}:`, games);
         } else {
           try {
             games = await pydtApi.pollGames();
-            console.log('Polled games:', games);
+            console.log(`Polled games for ${username}:`, games);
           } catch (error) {
-            console.error('Error polling games:', error);
+            console.error(`Error polling games for ${username}:`, error);
             // If polling fails, fall back to full games fetch
-            games = await pydtApi.getGames();
-            console.log('Fetched games after poll error:', games);
+            const response = await pydtApi.getGames();
+            console.log(`Raw response from getGames after poll error for ${username}:`, response);
+            if (Array.isArray(response)) {
+              games = response;
+            } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
+              games = (response as any).data;
+            } else {
+              console.error(`Unexpected response format from getGames after poll error for ${username}:`, response);
+              continue;
+            }
+            console.log(`Fetched games after poll error for ${username}:`, games);
+          }
+        }
+        
+        // Add games to the collection, avoiding duplicates by gameId
+        for (const game of games) {
+          if (!allGames.some(g => g.gameId === game.gameId)) {
+            allGames.push(game);
           }
         }
 
@@ -89,21 +115,34 @@ async function updateTrayMenu() {
         const steamIds = [...new Set(games.map(game => game.currentPlayerSteamId))];
         if (steamIds.length > 0) {
           const profiles = await pydtApi.getSteamProfiles(steamIds);
-          playerProfiles = profiles.reduce((acc, profile) => {
-            acc[profile.steamid] = profile;
-            return acc;
-          }, {} as { [steamId: string]: SteamProfile });
+          playerProfiles = {
+            ...playerProfiles,
+            ...profiles.reduce((acc, profile) => {
+              acc[profile.steamid] = profile;
+              return acc;
+            }, {} as { [steamId: string]: SteamProfile })
+          };
         }
       } catch (error) {
-        console.error('Error fetching games:', error);
+        console.error(`Error fetching games for ${username}:`, error);
       }
     }
 
-    // Check if any in-progress games are waiting for current user's turn
-    const isMyTurn = games.some(game => 
-      game.inProgress && 
-      game.currentPlayerSteamId === selectedToken
-    );
+    // Check if any in-progress games are waiting for any of our profiles' turns
+    let isMyTurn = false;
+    for (const game of allGames) {
+      if (!game.inProgress) continue;
+      
+      for (const token of Object.values(tokens)) {
+        pydtApi.setToken(token);
+        const userData = await pydtApi.getUserData();
+        if (game.currentPlayerSteamId === userData.steamId) {
+          isMyTurn = true;
+          break;
+        }
+      }
+      if (isMyTurn) break;
+    }
 
     // Update tray icon based on turn status
     const iconPath = createTrayIcon(isMyTurn);
@@ -113,8 +152,8 @@ async function updateTrayMenu() {
       {
         label: 'Games',
         submenu: [
-          ...(games.filter(game => game.inProgress).length > 0 
-            ? games.filter(game => game.inProgress).map(game => {
+          ...(allGames.filter(game => game.inProgress).length > 0 
+            ? allGames.filter(game => game.inProgress).map(game => {
                 const currentPlayer = playerProfiles[game.currentPlayerSteamId];
                 const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
                 return {

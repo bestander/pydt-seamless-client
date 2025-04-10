@@ -64,16 +64,18 @@ export class PYDTApi {
     this.token = token;
   }
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    if (!this.token) {
+  private async request<T>(endpoint: string, options: RequestInit = {}, skipAuth: boolean = false): Promise<T> {
+    if (!this.token && !skipAuth) {
       throw new Error('No token set');
     }
 
-    const headers = {
-      'Authorization': this.token,
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    const headers = skipAuth
+      ? { 'Content-Type': 'application/json' }
+      : {
+          'Authorization': this.token!,
+          'Content-Type': 'application/json',
+          ...options.headers,
+        };
 
     const url = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
     console.log(`Making API request to ${url}`);
@@ -118,11 +120,8 @@ export class PYDTApi {
     if (!this.pollUrl) {
       throw new Error('No poll URL available');
     }
-    const response = await this.request<{ data: PYDTGame[], pollUrl?: string }>(this.pollUrl);
-    if (response.pollUrl) {
-      this.pollUrl = response.pollUrl;
-    }
-    return response.data;
+    const response = await this.request<PYDTGame[]>(this.pollUrl, {}, true);
+    return response;
   }
 }
 
