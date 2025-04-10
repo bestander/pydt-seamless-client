@@ -43,6 +43,17 @@ export interface PYDTGame {
   humans: number;
 }
 
+export interface SteamProfile {
+  avatar: string;
+  avatarfull: string;
+  avatarmedium: string;
+  personaname: string;
+  profileurl: string;
+  steamid: string;
+  timezone: string;
+  vacationMode: boolean;
+}
+
 export class PYDTApi {
   private token: string | null = null;
   private baseUrl = 'https://api.playyourdamnturn.com';
@@ -90,6 +101,11 @@ export class PYDTApi {
   async getGames(): Promise<PYDTGame[]> {
     const response = await this.request<{ data: PYDTGame[] }>('/user/games');
     return response.data;
+  }
+
+  async getSteamProfiles(steamIds: string[]): Promise<SteamProfile[]> {
+    const response = await this.request<SteamProfile[]>(`/user/steamProfiles?steamIds=${steamIds.join(',')}`);
+    return response;
   }
 }
 

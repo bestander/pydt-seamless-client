@@ -2,7 +2,7 @@ import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell } from 'ele
 import * as path from 'path';
 import Store from 'electron-store';
 import * as fs from 'fs';
-import { pydtApi, PYDTUser, PYDTGame } from '../shared/api';
+import { pydtApi, PYDTUser, PYDTGame, SteamProfile } from '../shared/api';
 
 interface AppState {
   tokens: { [name: string]: string };  // name -> token mapping
@@ -345,11 +345,23 @@ async function updateTrayMenu() {
 
     // Fetch games if a token is selected
     let games: PYDTGame[] = [];
+    let playerProfiles: { [steamId: string]: SteamProfile } = {};
+    
     if (selectedToken && tokens[selectedToken]) {
       try {
         pydtApi.setToken(tokens[selectedToken]);
         games = await pydtApi.getGames();
         console.log('Fetched games:', games);
+
+        // Get unique steam IDs from all games
+        const steamIds = [...new Set(games.map(game => game.currentPlayerSteamId))];
+        if (steamIds.length > 0) {
+          const profiles = await pydtApi.getSteamProfiles(steamIds);
+          playerProfiles = profiles.reduce((acc, profile) => {
+            acc[profile.steamid] = profile;
+            return acc;
+          }, {} as { [steamId: string]: SteamProfile });
+        }
       } catch (error) {
         console.error('Error fetching games:', error);
       }
@@ -378,12 +390,16 @@ async function updateTrayMenu() {
         label: 'Games',
         submenu: [
           ...(games.length > 0 
-            ? games.map(game => ({
-                label: `${game.displayName} (${game.inProgress ? 'In Progress' : game.completed ? 'Completed' : 'Waiting'})`,
-                click: () => {
-                  shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
-                }
-              }))
+            ? games.map(game => {
+                const currentPlayer = playerProfiles[game.currentPlayerSteamId];
+                const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
+                return {
+                  label: `${game.displayName}${playerName}`,
+                  click: () => {
+                    shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
+                  }
+                };
+              })
             : [{
                 label: 'No games available',
                 enabled: false
