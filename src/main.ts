@@ -244,6 +244,9 @@ async function updateTrayMenu() {
                       if (success) {
                         updateTrayMenu();
                       }
+                    } else {
+                      // If it's not our turn, open the game in browser
+                      shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
                     }
                   }
                 };
