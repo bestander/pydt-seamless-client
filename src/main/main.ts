@@ -20,6 +20,7 @@ const store = new Store<AppState>({
 });
 
 let tray: Tray | null = null;
+let pollInterval: NodeJS.Timeout | null = null;
 
 function createInputWindow(title: string, message: string): Promise<string | null> {
   return new Promise((resolve) => {
@@ -376,8 +377,22 @@ async function updateTrayMenu() {
     if (selectedToken && tokens[selectedToken]) {
       try {
         pydtApi.setToken(tokens[selectedToken]);
-        games = await pydtApi.getGames();
-        console.log('Fetched games:', games);
+        
+        // If we have a poll URL, use it, otherwise do a full games fetch
+        if (pollInterval === null) {
+          games = await pydtApi.getGames();
+          console.log('Fetched games:', games);
+        } else {
+          try {
+            games = await pydtApi.pollGames();
+            console.log('Polled games:', games);
+          } catch (error) {
+            console.error('Error polling games:', error);
+            // If polling fails, fall back to full games fetch
+            games = await pydtApi.getGames();
+            console.log('Fetched games after poll error:', games);
+          }
+        }
 
         // Get unique steam IDs from all games
         const steamIds = [...new Set(games.map(game => game.currentPlayerSteamId))];
@@ -461,10 +476,15 @@ async function updateTrayMenu() {
   }
 }
 
-// Wait for the app to be ready
+// Start polling when the app is ready
 app.whenReady().then(() => {
   console.log('App is ready, creating tray...');
   createTray();
+  
+  // Start polling every minute
+  pollInterval = setInterval(() => {
+    updateTrayMenu();
+  }, 60000); // 60 seconds
 });
 
 // Handle window-all-closed event
@@ -475,7 +495,11 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Log when the app is quitting
+// Clean up polling when the app is quitting
 app.on('before-quit', () => {
   console.log('App is quitting');
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
 }); 

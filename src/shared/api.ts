@@ -41,6 +41,7 @@ export interface PYDTGame {
   turnsSkipped: number;
   slots: number;
   humans: number;
+  pollUrl?: string;
 }
 
 export interface SteamProfile {
@@ -57,6 +58,7 @@ export interface SteamProfile {
 export class PYDTApi {
   private token: string | null = null;
   private baseUrl = 'https://api.playyourdamnturn.com';
+  private pollUrl: string | null = null;
 
   setToken(token: string) {
     this.token = token;
@@ -73,10 +75,11 @@ export class PYDTApi {
       ...options.headers,
     };
 
-    console.log(`Making API request to ${this.baseUrl}${endpoint}`);
+    const url = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
+    console.log(`Making API request to ${url}`);
     console.log('Headers:', headers);
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    const response = await fetch(url, {
       ...options,
       headers,
     });
@@ -99,13 +102,27 @@ export class PYDTApi {
   }
 
   async getGames(): Promise<PYDTGame[]> {
-    const response = await this.request<{ data: PYDTGame[] }>('/user/games');
+    const response = await this.request<{ data: PYDTGame[], pollUrl?: string }>('/user/games');
+    if (response.pollUrl) {
+      this.pollUrl = response.pollUrl;
+    }
     return response.data;
   }
 
   async getSteamProfiles(steamIds: string[]): Promise<SteamProfile[]> {
     const response = await this.request<SteamProfile[]>(`/user/steamProfiles?steamIds=${steamIds.join(',')}`);
     return response;
+  }
+
+  async pollGames(): Promise<PYDTGame[]> {
+    if (!this.pollUrl) {
+      throw new Error('No poll URL available');
+    }
+    const response = await this.request<{ data: PYDTGame[], pollUrl?: string }>(this.pollUrl);
+    if (response.pollUrl) {
+      this.pollUrl = response.pollUrl;
+    }
+    return response.data;
   }
 }
 
