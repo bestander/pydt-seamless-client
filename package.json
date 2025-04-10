@@ -18,6 +18,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "axios": "^1.8.4",
     "electron-store": "^8.1.0"
   },
   "build": {
