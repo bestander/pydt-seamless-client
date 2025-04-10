@@ -55,6 +55,12 @@ export interface SteamProfile {
   vacationMode: boolean;
 }
 
+export interface TurnInfo {
+  downloadUrl: string;
+  size: number;
+  version: string;
+}
+
 export class PYDTApi {
   private token: string | null = null;
   private baseUrl = 'https://api.playyourdamnturn.com';
@@ -122,6 +128,10 @@ export class PYDTApi {
     }
     const response = await this.request<PYDTGame[]>(this.pollUrl, {}, true);
     return response;
+  }
+
+  async getTurnUrl(gameId: string): Promise<TurnInfo> {
+    return this.request<TurnInfo>(`/game/${gameId}/turn?compressed=yup`);
   }
 }
 

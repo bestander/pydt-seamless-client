@@ -2,11 +2,15 @@ import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell } from 'ele
 import * as path from 'path';
 import * as fs from 'fs';
 import { createCanvas } from 'canvas';
-import { pydtApi, PYDTGame, SteamProfile } from './api';
+import { pydtApi, PYDTGame, SteamProfile, TurnInfo } from './api';
 import { addUser, getStore, refreshUserData } from './account';
+import * as os from 'os';
+import * as https from 'https';
+import * as zlib from 'zlib';
 
 let tray: Tray | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
+let downloadedTurns: { [gameId: string]: boolean } = {};
 
 function createTrayIcon(isMyTurn: boolean = false) {
   const size = 16;
@@ -50,6 +54,69 @@ function createTray() {
   }
 }
 
+async function downloadTurn(game: PYDTGame, username: string, token: string): Promise<boolean> {
+  try {
+    // Get the turn URL
+    pydtApi.setToken(token);
+    const turnInfo = await pydtApi.getTurnUrl(game.gameId);
+    
+    // Create the filename (without .gz extension)
+    const sanitizedGameName = game.displayName.replace(/[<>:"/\\|?*]/g, '_');
+    const filename = `!PYDT-${sanitizedGameName}-${username}.Civ6Save`;
+    
+    // Determine the save directory based on OS
+    let saveDir = '';
+    if (process.platform === 'darwin') {
+      saveDir = path.join(os.homedir(), 'Library', 'Application Support', 'Sid Meier\'s Civilization VI', 'Sid Meier\'s Civilization VI', 'Saves', 'Hotseat');
+    } else if (process.platform === 'win32') {
+      saveDir = path.join(os.homedir(), 'Documents', 'My Games', 'Sid Meier\'s Civilization VI', 'Saves', 'Hotseat');
+    } else {
+      console.error('Unsupported platform for saving turns');
+      return false;
+    }
+    
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(saveDir)) {
+      fs.mkdirSync(saveDir, { recursive: true });
+    }
+    
+    const filePath = path.join(saveDir, filename);
+    
+    // Download and decompress the file
+    return new Promise<boolean>((resolve, reject) => {
+      const file = fs.createWriteStream(filePath);
+      
+      https.get(turnInfo.downloadUrl, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to download turn: ${response.statusCode} ${response.statusMessage}`));
+          return;
+        }
+        
+        // Pipe through gunzip to decompress
+        response.pipe(zlib.createGunzip()).pipe(file);
+        
+        file.on('finish', () => {
+          file.close();
+          console.log(`Turn downloaded and decompressed successfully: ${filePath}`);
+          downloadedTurns[game.gameId] = true;
+          resolve(true);
+        });
+      }).on('error', (err) => {
+        fs.unlink(filePath, () => {}); // Delete the file if there was an error
+        reject(err);
+      });
+      
+      file.on('error', (err) => {
+        fs.unlink(filePath, () => {}); // Delete the file if there was an error
+        reject(err);
+      });
+    });
+  } catch (error) {
+    console.error(`Error downloading turn for game ${game.gameId}:`, error);
+    return false;
+  }
+}
+
 async function updateTrayMenu() {
   if (!tray) {
     console.error('Tray is null, cannot update menu');
@@ -63,6 +130,7 @@ async function updateTrayMenu() {
     // Fetch games for all profiles
     let allGames: PYDTGame[] = [];
     let playerProfiles: { [steamId: string]: SteamProfile } = {};
+    let myTurnGames: { [gameId: string]: { game: PYDTGame, username: string, token: string } } = {};
     
     // Fetch games for each token
     for (const [username, token] of Object.entries(tokens)) {
@@ -108,6 +176,14 @@ async function updateTrayMenu() {
         for (const game of games) {
           if (!allGames.some(g => g.gameId === game.gameId)) {
             allGames.push(game);
+          }
+          
+          // Check if this is our turn
+          if (game.inProgress) {
+            const userData = await pydtApi.getUserData();
+            if (game.currentPlayerSteamId === userData.steamId) {
+              myTurnGames[game.gameId] = { game, username, token };
+            }
           }
         }
 
@@ -156,10 +232,19 @@ async function updateTrayMenu() {
             ? allGames.filter(game => game.inProgress).map(game => {
                 const currentPlayer = playerProfiles[game.currentPlayerSteamId];
                 const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
+                const isDownloaded = downloadedTurns[game.gameId] ? ' [PYDT]' : '';
+                const myTurnInfo = myTurnGames[game.gameId];
+                
                 return {
-                  label: `${game.displayName}${playerName}`,
-                  click: () => {
-                    shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
+                  label: `${game.displayName}${playerName}${isDownloaded}`,
+                  click: async () => {
+                    if (myTurnInfo) {
+                      // If it's our turn, download the turn
+                      const success = await downloadTurn(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
+                      if (success) {
+                        updateTrayMenu();
+                      }
+                    }
                   }
                 };
               })
