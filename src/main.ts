@@ -20,10 +20,19 @@ let watchedGames: { [gameId: string]: {
   username: string,
   processedFiles: Set<string>
 }} = {};
-let userDataCache: { [token: string]: any } = {};
+let userStateCache: { [token: string]: UserState } = {};
 let steamProfilesCache: { [steamId: string]: SteamProfile } = {};
 let steamProfilesCacheExpiry: number = 0;
 const STEAM_PROFILES_CACHE_DURATION = 180 * 60 * 1000; // 180 minutes in milliseconds
+
+// Add a variable to track the current update promise
+let currentTrayUpdatePromise: Promise<void> | null = null;
+
+interface UserState {
+  username: string;
+  pollUrl: string | null;
+  steamId: string | null;
+}
 
 function createTrayIcon(isMyTurn: boolean = false, isWatching: boolean = false) {
   const size = 16;
@@ -64,26 +73,33 @@ function createTray() {
     tray = new Tray(iconPath);
     tray.setToolTip('PYDT Super Client');
     
-    // Update the menu
-    updateTrayMenu();
-    
     console.log('Tray created successfully');
   } catch (error) {
     console.error('Error creating tray:', error);
   }
 }
 
-async function submitTurn(gameId: string, filePath: string, token: string): Promise<boolean> {
+async function submitTurn(game: PYDTGame, username: string, token: string, filePath: string) {
   try {
-    // Get the upload URL
-    const submitResponse = await pydtApi.startTurnSubmit(token, gameId);
+
+    // Check if it's our turn using the cached user data
+    if (game.currentPlayerSteamId !== userStateCache[token].steamId) {
+      console.log(`Not my turn for game ${game.displayName}`);
+      return false;
+    }
+
+    console.log(`Starting turn submission for game ${game.displayName}`);
     
+    // Start the turn submission process
+    const startResponse = await pydtApi.startTurnSubmit(token, game.gameId);
+    console.log('Start turn submit response:', startResponse);
+
     // Read the file and compress it
     const fileBuffer = fs.readFileSync(filePath);
     const compressedBuffer = zlib.gzipSync(fileBuffer);
 
-    // Upload the compressed file
-    await fetch(submitResponse.putUrl, {
+
+    await fetch(startResponse.putUrl, {
       method: 'PUT',
       body: compressedBuffer,
       headers: {
@@ -91,45 +107,77 @@ async function submitTurn(gameId: string, filePath: string, token: string): Prom
         'Content-Encoding': 'gzip'
       }
     });
-
+    
+    
+    // Finish the turn submission
+    const finishResponse = await pydtApi.finishTurnSubmit(token, game.gameId);
+    console.log('Finish turn submit response:', finishResponse);
+    
+    // After successful turn submission, fetch games to get the new poll URL
     try {
-      // Finish the submission
-      await pydtApi.finishTurnSubmit(token, gameId);
-      console.log(`Turn submitted successfully for game ${gameId}`);
-      
-      // Do a fresh poll of the game after successful submission
-      try {
-        console.log(`Polling game ${gameId} after turn submission`);
-        const games = await pydtApi.getGames(token);
-        const updatedGame = games.find(g => g.gameId === gameId);
-        if (updatedGame) {
-          console.log(`Game ${gameId} updated after submission. Current player: ${updatedGame.currentPlayerSteamId}`);
+      // Check if we have a cached poll URL
+      if (userStateCache[token]?.pollUrl) {
+        try {
+          // Use the cached poll URL to get games
+          const response = await fetch(userStateCache[token].pollUrl!);
+          if (response.ok) {
+            const games = await response.json();
+            console.log(`Fetched ${games.length} games from poll URL after turn submission`);
+            
+            // Update the poll URL cache if a new poll URL is returned
+            if (games.length > 0 && games[0].pollUrl) {
+              userStateCache[token] = {
+                ...userStateCache[token],
+                pollUrl: games[0].pollUrl
+              };
+              console.log(`Updated poll URL cache after turn submission: ${userStateCache[token].pollUrl}`);
+            }
+          } else {
+            throw new Error(`Poll URL request failed: ${response.status}`);
+          }
+        } catch (pollError: any) {
+          console.error(`Error using poll URL after turn submission:`, pollError);
+          // If poll URL fails, fall back to full games fetch
+          const gamesData = await pydtApi.getGames(token);
+          const games = gamesData.data;
+          
+          // Update the poll URL cache if a new poll URL is returned
+          if (games.length > 0 && gamesData.pollUrl) {
+            userStateCache[token] = {
+              ...userStateCache[token],
+              pollUrl: gamesData.pollUrl
+            };
+            console.log(`Updated poll URL cache after turn submission: ${userStateCache[token].pollUrl}`);
+          }
         }
-      } catch (pollError: any) {
-        console.error(`Error polling game ${gameId} after submission:`, pollError);
+      } else {
+        // No cached poll URL, do a full games fetch
+        const gamesData = await pydtApi.getGames(token);
+        const games = gamesData.data;
+        
+        // Update the poll URL cache if a poll URL is returned
+        if (games.length > 0 && gamesData.pollUrl) {
+          userStateCache[token] = {
+            ...userStateCache[token],
+            pollUrl: gamesData.pollUrl
+          };
+          console.log(`Cached poll URL after turn submission: ${userStateCache[token].pollUrl}`);
+        }
       }
       
-      return true;
+      // Update the tray menu to reflect the new state
+      updateTrayMenu();
     } catch (error: any) {
-      console.error(`Error finishing turn submission for game ${gameId}:`, error);
-      
-      // Show notification for finishSubmit failure
-      new Notification({
-        title: 'Turn Submission Failed',
-        body: `Failed to complete turn submission: ${error.message || 'Unknown error'}`
-      }).show();
-      
-      return false;
+      console.error('Error fetching games after turn submission:', error);
+      console.error(`Error details: ${error.message || 'Unknown error'}`);
+      console.error(`Error stack: ${error.stack || 'No stack trace'}`);
     }
+    
+    return true;
   } catch (error: any) {
-    console.error(`Error submitting turn for game ${gameId}:`, error);
-    
-    // Show notification for general submission failure
-    new Notification({
-      title: 'Turn Submission Failed',
-      body: `Failed to submit turn: ${error.message || 'Unknown error'}`
-    }).show();
-    
+    console.error('Error submitting turn:', error);
+    console.error(`Error details: ${error.message || 'Unknown error'}`);
+    console.error(`Error stack: ${error.stack || 'No stack trace'}`);
     return false;
   }
 }
@@ -201,7 +249,7 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
       // Wait a moment to ensure the file is fully written
       setTimeout(async () => {
         try {
-          const success = await submitTurn(game.gameId, filePath, token);
+          const success = await submitTurn(game, username, token, filePath);
           if (success) {
             // Stop watching after successful submission
             watcher.close();
@@ -221,6 +269,7 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
   try {
     // Get the turn URL
     const turnInfo = await pydtApi.getTurnUrl(token, game.gameId);
+    console.log('Turn info:', turnInfo);
     
     // Create the filename (without .gz extension)
     const sanitizedGameName = game.displayName.replace(/[<>:"/\\|?*]/g, '_');
@@ -280,218 +329,361 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
   }
 }
 
+async function downloadAndProcessTurn(turnInfo: TurnInfo): Promise<any> {
+  try {
+    console.log(`Downloading turn data from ${turnInfo.getUrl}`);
+    
+    // Download the turn data with a timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    try {
+      const response = await fetch(turnInfo.getUrl, {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download turn: ${response.status} ${response.statusText}`);
+      }
+      
+      // Get the compressed data
+      const compressedData = await response.arrayBuffer();
+      
+      // Decompress the data
+      const decompressedData = zlib.gunzipSync(Buffer.from(compressedData));
+      
+      // Parse the JSON data
+      return JSON.parse(decompressedData.toString());
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      
+      if (fetchError.name === 'AbortError') {
+        throw new Error('Turn download timed out after 30 seconds');
+      }
+      
+      if (fetchError.code === 'ECONNREFUSED' || fetchError.code === 'ENOTFOUND') {
+        throw new Error(`Network error: ${fetchError.message}`);
+      }
+      
+      throw fetchError;
+    }
+  } catch (error: any) {
+    console.error('Error downloading and processing turn:', error);
+    console.error(`Error details: ${error.message || 'Unknown error'}`);
+    console.error(`Error stack: ${error.stack || 'No stack trace'}`);
+    
+    // If it's a network error, try one more time after a short delay
+    if (error.message.includes('Network error') || error.message.includes('timed out')) {
+      console.log('Retrying turn download after network error...');
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+      
+      try {
+        const response = await fetch(turnInfo.getUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to download turn on retry: ${response.status} ${response.statusText}`);
+        }
+        
+        const compressedData = await response.arrayBuffer();
+        const decompressedData = zlib.gunzipSync(Buffer.from(compressedData));
+        return JSON.parse(decompressedData.toString());
+      } catch (retryError: any) {
+        console.error('Error on retry:', retryError);
+        return null;
+      }
+    }
+    
+    return null;
+  }
+}
+
+// Helper function to update poll URL in cache
+function updatePollUrlCache(token: string, pollUrl: string | null) {
+  if (pollUrl) {
+    userStateCache[token] = {
+      ...userStateCache[token],
+      pollUrl
+    };
+    console.log(`Updated poll URL cache: ${pollUrl}`);
+  }
+}
+
 async function updateTrayMenu() {
   if (!tray) {
     console.error('Tray is null, cannot update menu');
     return;
   }
 
-  try {
-    const tokens = getStore().get('tokens') as { [key: string]: string };
-    const allGames: PYDTGame[] = [];
-    const myTurnGames: { [gameId: string]: { game: PYDTGame, username: string, token: string } } = {};
-    let playerProfiles: { [steamId: string]: SteamProfile } = {};
+  // If there's already an update in progress, wait for it to complete
+  if (currentTrayUpdatePromise) {
+    console.log('Tray update already in progress, waiting for it to complete...');
+    await currentTrayUpdatePromise;
+    return;
+  }
 
-    // First, fetch all user data upfront to avoid duplicate calls
-    const userDataPromises = Object.entries(tokens).map(async ([username, token]) => {
-      if (!userDataCache[token]) {
+  // Create a new promise for this update
+  currentTrayUpdatePromise = (async () => {
+    try {
+      const tokens = getStore().get('tokens') as { [key: string]: string };
+      console.log(`Tokens: ${JSON.stringify(tokens)}`);
+      const allGames: PYDTGame[] = [];
+      const myTurnGames: { [gameId: string]: { game: PYDTGame, username: string, token: string } } = {};
+      let playerProfiles: { [steamId: string]: SteamProfile } = {};
+
+      // First, fetch all user data upfront to avoid duplicate calls
+      const userDataPromises = Object.entries(tokens).map(async ([username, token]) => {
         try {
-          userDataCache[token] = await pydtApi.getUserData(token);
-          console.log(`Fetched user data for ${username}`);
+          // Check if we have cached user data
+          if (!userStateCache[token]) {
+            const userData = await pydtApi.getUserData(token);
+            userStateCache[token] = {
+              username,
+              pollUrl: null,
+              steamId: userData.steamId
+            };
+            console.log(`Fetched user data for ${username}`);
+          } else {
+            console.log(`Using cached user data for ${username}`);
+          }
+          return { username, token, userData: userStateCache[token] };
         } catch (error: any) {
           console.error(`Error fetching user data for ${username}:`, error);
           console.error(`Error details: ${error.message || 'Unknown error'}`);
           console.error(`Error stack: ${error.stack || 'No stack trace'}`);
         }
-      }
-      return { username, token, userData: userDataCache[token] };
-    });
+      });
 
-    const userDataResults = await Promise.all(userDataPromises);
-    const userDataMap = userDataResults.reduce((acc, { token, userData }) => {
-      acc[token] = userData;
-      return acc;
-    }, {} as { [token: string]: any });
-
-    // Now fetch games for each user
-    for (const [username, token] of Object.entries(tokens)) {
-      try {
-        console.log(`No poll URL available for ${username}, doing full games fetch`);
-        const games = await pydtApi.getGames(token);
-        console.log(`Fetched games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
-
-        // Add games to the collection, avoiding duplicates by gameId
-        for (const game of games) {
-          if (!allGames.some(g => g.gameId === game.gameId)) {
-            allGames.push(game);
-          }
-          
-          // Check if this is our turn using the cached user data
-          try {
-            const userData = userDataMap[token];
-            if (userData && game.currentPlayerSteamId === userData.steamId) {
-              myTurnGames[game.gameId] = { game, username, token };
-            }
-          } catch (error: any) {
-            console.error(`Error checking if game ${game.gameId} is my turn:`, error);
-            console.error(`Error details: ${error.message || 'Unknown error'}`);
-            console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-            console.error(`userDataCache[token]:`, userDataMap[token]);
-            console.error(`game.currentPlayerSteamId:`, game.currentPlayerSteamId);
-          }
+      const userDataResults = await Promise.all(userDataPromises);
+      const userDataMap = userDataResults.reduce((acc, result) => {
+        if (result && result.userData) {
+          acc[result.token] = result.userData;
         }
+        return acc;
+      }, {} as { [token: string]: UserState });
 
-        // Get unique steam IDs from all games
-        const steamIds = [...new Set(games.map(game => game.currentPlayerSteamId))];
-        if (steamIds.length > 0) {
-          // Check if we need to refresh the Steam profiles cache
-          const now = Date.now();
-          if (now > steamProfilesCacheExpiry) {
-            // Cache expired, fetch new profiles
+      // Now fetch games for each user
+      for (const [username, token] of Object.entries(tokens)) {
+        try {
+          let games: PYDTGame[] = [];
+          
+          // Check if we have a poll URL for this user
+          if (userStateCache[token]?.pollUrl) {
+            console.log(`Using cached poll URL for ${username}: ${userStateCache[token].pollUrl}`);
             try {
-              const profiles = await pydtApi.getSteamProfiles(token, steamIds);
-              steamProfilesCache = profiles.reduce((acc, profile) => {
-                acc[profile.steamid] = profile;
-                return acc;
-              }, {} as { [steamId: string]: SteamProfile });
-              steamProfilesCacheExpiry = now + STEAM_PROFILES_CACHE_DURATION;
-              console.log('Steam profiles cache refreshed');
-              updateSteamProfilesCacheInLogger();
+              // Use the cached poll URL to get games
+              const response = await fetch(userStateCache[token].pollUrl!);
+              if (response.ok) {
+                games = await response.json();
+                console.log(`Fetched ${games.length} games from poll URL for ${username}`);
+              } else {
+                console.error(`Error fetching from poll URL for ${username}: ${response.status} ${response.statusText}`);
+                // If poll URL fails, fall back to full games fetch
+                throw new Error(`Poll URL request failed: ${response.status}`);
+              }
+            } catch (pollError: any) {
+              console.error(`Error using poll URL for ${username}:`, pollError);
+              // If poll URL fails, fall back to full games fetch
+              console.log(`No poll URL available for ${username}, doing full games fetch`);
+              const gamesData = await pydtApi.getGames(token);
+              games = gamesData.data;
+              
+              // Update the poll URL cache if a new poll URL is returned
+              if (games.length > 0 && gamesData.pollUrl) {
+                updatePollUrlCache(token, gamesData.pollUrl);
+              }
+            }
+          } else {
+            // No cached poll URL, do a full games fetch
+            console.log(`No poll URL available for ${username}, doing full games fetch`);
+            const gamesData = await pydtApi.getGames(token);
+            games = gamesData.data;
+            
+            // Update the poll URL cache if a poll URL is returned
+            if (games.length > 0 && gamesData.pollUrl) {
+              updatePollUrlCache(token, gamesData.pollUrl);
+            }
+          }
+
+          // Add games to the collection, avoiding duplicates by gameId
+          for (const game of games) {
+            if (!allGames.some(g => g.gameId === game.gameId)) {
+              allGames.push(game);
+            }
+            
+            // Check if this is our turn using the cached user data
+            try {
+              const userData = userDataMap[token];
+              if (userData && game.currentPlayerSteamId === userData.steamId) {
+                myTurnGames[game.gameId] = { game, username, token };
+              }
             } catch (error: any) {
-              console.error(`Error fetching Steam profiles:`, error);
+              console.error(`Error checking if game ${game.gameId} is my turn:`, error);
               console.error(`Error details: ${error.message || 'Unknown error'}`);
               console.error(`Error stack: ${error.stack || 'No stack trace'}`);
+              console.error(`userDataCache[token]:`, userDataMap[token]);
+              console.error(`game.currentPlayerSteamId:`, game.currentPlayerSteamId);
             }
           }
+
+          // Get unique steam IDs from all games
+          const steamIds = [...new Set(games.map(game => game.currentPlayerSteamId))];
+          if (steamIds.length > 0) {
+            // Check if we need to refresh the Steam profiles cache
+            const now = Date.now();
+            if (now > steamProfilesCacheExpiry) {
+              // Cache expired, fetch new profiles
+              try {
+                const profiles = await pydtApi.getSteamProfiles(token, steamIds);
+                steamProfilesCache = profiles.reduce((acc, profile) => {
+                  acc[profile.steamid] = profile;
+                  return acc;
+                }, {} as { [steamId: string]: SteamProfile });
+                steamProfilesCacheExpiry = now + STEAM_PROFILES_CACHE_DURATION;
+                console.log('Steam profiles cache refreshed');
+                updateSteamProfilesCacheInLogger();
+              } catch (error: any) {
+                console.error(`Error fetching Steam profiles:`, error);
+                console.error(`Error details: ${error.message || 'Unknown error'}`);
+                console.error(`Error stack: ${error.stack || 'No stack trace'}`);
+              }
+            }
+            
+            // Use cached profiles
+            playerProfiles = {
+              ...playerProfiles,
+              ...steamProfilesCache
+            };
+          }
+        } catch (error: any) {
+          console.error(`Error fetching games for ${username}:`, error);
+          console.error(`Error details: ${error.message || 'Unknown error'}`);
+          console.error(`Error stack: ${error.stack || 'No stack trace'}`);
           
-          // Use cached profiles
-          playerProfiles = {
-            ...playerProfiles,
-            ...steamProfilesCache
-          };
-        }
-      } catch (error: any) {
-        console.error(`Error fetching games for ${username}:`, error);
-        console.error(`Error details: ${error.message || 'Unknown error'}`);
-        console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-        
-        // Try to get more information about the error
-        if (error.response) {
-          console.error(`Error response status: ${error.response.status}`);
-          console.error(`Error response data:`, error.response.data);
+          // Try to get more information about the error
+          if (error.response) {
+            console.error(`Error response status: ${error.response.status}`);
+            console.error(`Error response data:`, error.response.data);
+          }
         }
       }
-    }
 
-    // Check if any games are waiting for any of our profiles' turns
-    let isMyTurn = false;
-    for (const game of allGames) {
-      for (const token of Object.values(tokens)) {
-        const userData = userDataMap[token];
-        if (userData && game.currentPlayerSteamId === userData.steamId) {
-          isMyTurn = true;
-          break;
+      // Check if any games are waiting for any of our profiles' turns
+      let isMyTurn = false;
+      for (const game of allGames) {
+        for (const token of Object.values(tokens)) {
+          const userData = userDataMap[token];
+          if (userData && game.currentPlayerSteamId === userData.steamId) {
+            isMyTurn = true;
+            break;
+          }
         }
+        if (isMyTurn) break;
       }
-      if (isMyTurn) break;
-    }
 
-    // Update tray icon based on turn status
-    const isWatching = Object.keys(watchedGames).length > 0;
-    const iconPath = createTrayIcon(isMyTurn, isWatching);
-    tray.setImage(iconPath);
+      // Update tray icon based on turn status
+      const isWatching = Object.keys(watchedGames).length > 0;
+      const iconPath = createTrayIcon(isMyTurn, isWatching);
+      tray.setImage(iconPath);
 
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Games',
-        submenu: [
-          ...(allGames.length > 0 
-            ? allGames.map(game => {
-                const currentPlayer = playerProfiles[game.currentPlayerSteamId];
-                const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
-                const myTurnInfo = myTurnGames[game.gameId];
-                const isWatching = watchedGames[game.gameId] ? ' ⌛' : ''; // Add hourglass only for games being watched
-                
-                return {
-                  label: `${game.displayName}${playerName}${isWatching}`,
-                  click: async () => {
-                    if (myTurnInfo) {
-                      // Check if this is a first turn
-                      if (game.gameTurnRangeKey === 1) {
-                        // For first turns, just start watching without downloading
-                        startWatchingGame(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
-                      } else {
-                        // For regular turns, download first
-                        const success = await downloadTurn(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
-                        if (success) {
-                          updateTrayMenu();
-                        }
-                      }
-                    } else {
-                      // If it's not our turn, open the game in browser
-                      shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
+      // Create the games submenu
+      const gamesSubmenu = allGames.length > 0 
+        ? allGames.map(game => {
+            const currentPlayer = playerProfiles[game.currentPlayerSteamId];
+            const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
+            const myTurnInfo = myTurnGames[game.gameId];
+            const isWatching = watchedGames[game.gameId] ? ' ⌛' : ''; // Add hourglass only for games being watched
+            
+            return {
+              label: `${game.displayName}${playerName}${isWatching}`,
+              click: async () => {
+                if (myTurnInfo) {
+                  // Check if this is a first turn
+                  if (game.gameTurnRangeKey === 1) {
+                    // For first turns, just start watching without downloading
+                    startWatchingGame(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
+                  } else {
+                    // For regular turns, download first
+                    const success = await downloadTurn(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
+                    if (success) {
+                      updateTrayMenu();
                     }
                   }
-                };
-              })
-            : [{
-                label: 'No games available',
-                enabled: false
-              }]
-          )
-        ]
-      },
-      { type: 'separator' },
-      {
-        label: 'Open PYDT',
-        click: () => {
-          shell.openExternal('https://playyourdamnturn.com');
-        }
-      },
-      {
-        label: 'Manage Accounts',
-        click: addUser
-      },
-      {
-        label: 'Refresh All',
-        click: async () => {
-          // Clear the user data cache before refreshing
-          userDataCache = {};
-          for (const name of Object.keys(tokens)) {
-            await refreshUserData(name);
-          }
-          updateTrayMenu();
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'Open Log',
-        click: () => {
-          openLogWindow();
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'Quit',
-        click: () => {
-          app.quit();
-        }
-      }
-    ]);
+                } else {
+                  // If it's not our turn, open the game in browser
+                  shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
+                }
+              }
+            };
+          })
+        : [{
+            label: 'No games available',
+            enabled: false
+          }];
 
-    tray.setContextMenu(contextMenu);
-    console.log('Menu updated successfully');
-  } catch (error: any) {
-    console.error('Error updating menu:', error);
-    console.error(`Error details: ${error.message || 'Unknown error'}`);
-    console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-    
-    // Try to get more information about the error
-    if (error.response) {
-      console.error(`Error response status: ${error.response.status}`);
-      console.error(`Error response data:`, error.response.data);
+      const contextMenu = Menu.buildFromTemplate([
+        {
+          label: 'Games',
+          submenu: gamesSubmenu
+        },
+        { type: 'separator' },
+        {
+          label: 'Open PYDT',
+          click: () => {
+            shell.openExternal('https://playyourdamnturn.com');
+          }
+        },
+        {
+          label: 'Manage Accounts',
+          click: addUser
+        },
+        {
+          label: 'Refresh All',
+          click: async () => {
+            // Clear the user data cache before refreshing
+            userStateCache = {};
+            for (const name of Object.keys(tokens)) {
+              await refreshUserData(name);
+            }
+            updateTrayMenu();
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Open Log',
+          click: () => {
+            openLogWindow();
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit',
+          click: () => {
+            app.quit();
+          }
+        }
+      ]);
+
+      tray.setContextMenu(contextMenu);
+      console.log('Menu updated successfully');
+    } catch (error: any) {
+      console.error('Error updating menu:', error);
+      console.error(`Error details: ${error.message || 'Unknown error'}`);
+      console.error(`Error stack: ${error.stack || 'No stack trace'}`);
+      
+      // Try to get more information about the error
+      if (error.response) {
+        console.error(`Error response status: ${error.response.status}`);
+        console.error(`Error response data:`, error.response.data);
+      }
+    } finally {
+      // Clear the current update promise when done
+      currentTrayUpdatePromise = null;
     }
-  }
+  })();
+
+  // Return the promise so callers can await it if needed
+  return currentTrayUpdatePromise;
 }
 
 // Start polling when the app is ready
