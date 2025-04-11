@@ -262,120 +262,57 @@ async function updateTrayMenu() {
   }
 
   try {
-    const store = getStore();
-    const tokens = store.get('tokens', {});
-    
-    // Fetch games for all profiles
-    let allGames: PYDTGame[] = [];
+    const tokens = getStore().get('tokens') as { [key: string]: string };
+    const allGames: PYDTGame[] = [];
+    const myTurnGames: { [gameId: string]: { game: PYDTGame, username: string, token: string } } = {};
     let playerProfiles: { [steamId: string]: SteamProfile } = {};
-    let myTurnGames: { [gameId: string]: { game: PYDTGame, username: string, token: string } } = {};
-    
-    // Fetch games for each token
+
+    // First, fetch all user data upfront to avoid duplicate calls
+    const userDataPromises = Object.entries(tokens).map(async ([username, token]) => {
+      if (!userDataCache[token]) {
+        try {
+          userDataCache[token] = await pydtApi.getUserData(token);
+          console.log(`Fetched user data for ${username}`);
+        } catch (error: any) {
+          console.error(`Error fetching user data for ${username}:`, error);
+          console.error(`Error details: ${error.message || 'Unknown error'}`);
+          console.error(`Error stack: ${error.stack || 'No stack trace'}`);
+        }
+      }
+      return { username, token, userData: userDataCache[token] };
+    });
+
+    const userDataResults = await Promise.all(userDataPromises);
+    const userDataMap = userDataResults.reduce((acc, { token, userData }) => {
+      acc[token] = userData;
+      return acc;
+    }, {} as { [token: string]: any });
+
+    // Now fetch games for each user
     for (const [username, token] of Object.entries(tokens)) {
       try {
-        // If we have a poll URL, use it, otherwise do a full games fetch
-        let games: PYDTGame[] = [];
-        if (pollInterval === null) {
-          const response = await pydtApi.getGames(token);
-          console.log(`Raw response from getGames for ${username}:`, response);
-          if (Array.isArray(response)) {
-            games = response;
-          } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
-            games = (response as any).data;
-          } else {
-            console.error(`Unexpected response format from getGames for ${username}:`, response);
-            continue;
-          }
-          console.log(`Fetched games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
-        } else {
-          // Check if we have a poll URL before attempting to poll
-          const hasPollUrl = pydtApi.hasPollUrl();
-          if (hasPollUrl) {
-            try {
-              games = await pydtApi.pollGames(token);
-              console.log(`Polled games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
-            } catch (error: any) {
-              console.error(`Error polling games for ${username}:`, error);
-              console.error(`Error details: ${error.message || 'Unknown error'}`);
-              console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-              
-              // If polling fails, fall back to full games fetch
-              try {
-                const response = await pydtApi.getGames(token);
-                if (Array.isArray(response)) {
-                  games = response;
-                } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
-                  games = (response as any).data;
-                } else {
-                  console.error(`Unexpected response format from getGames after poll error for ${username}`);
-                  continue;
-                }
-                console.log(`Fetched games after poll error for ${username}: ${games.map(g => g.displayName).join(', ')}`);
-              } catch (fallbackError: any) {
-                console.error(`Error fetching games after poll error for ${username}:`, fallbackError);
-                console.error(`Fallback error details: ${fallbackError.message || 'Unknown error'}`);
-                continue;
-              }
-            }
-          } else {
-            // No poll URL available, do a full games fetch
-            console.log(`No poll URL available for ${username}, doing full games fetch`);
-            try {
-              const response = await pydtApi.getGames(token);
-              if (Array.isArray(response)) {
-                games = response;
-              } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
-                games = (response as any).data;
-              } else {
-                console.error(`Unexpected response format from getGames for ${username}:`, response);
-                continue;
-              }
-              console.log(`Fetched games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
-            } catch (error: any) {
-              console.error(`Error fetching games for ${username}:`, error);
-              console.error(`Error details: ${error.message || 'Unknown error'}`);
-              console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-              
-              // Try to get more information about the error
-              if (error.response) {
-                console.error(`Error response status: ${error.response.status}`);
-                console.error(`Error response data:`, error.response.data);
-              }
-              
-              continue;
-            }
-          }
-        }
-        
+        console.log(`No poll URL available for ${username}, doing full games fetch`);
+        const games = await pydtApi.getGames(token);
+        console.log(`Raw response from getGames for ${username}:`, JSON.stringify(games));
+        console.log(`Fetched games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
+
         // Add games to the collection, avoiding duplicates by gameId
         for (const game of games) {
           if (!allGames.some(g => g.gameId === game.gameId)) {
             allGames.push(game);
           }
           
-          // Check if this is our turn
-          // Only fetch user data if we don't have it cached
-          if (!userDataCache[token]) {
-            try {
-              userDataCache[token] = await pydtApi.getUserData(token);
-              console.log(`Fetched user data for ${username}`);
-            } catch (error: any) {
-              console.error(`Error fetching user data for ${username}:`, error);
-              console.error(`Error details: ${error.message || 'Unknown error'}`);
-              console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-              continue;
-            }
-          }
-          
+          // Check if this is our turn using the cached user data
           try {
-            if (game.currentPlayerSteamId === userDataCache[token].steamId) {
+            const userData = userDataMap[token];
+            if (userData && game.currentPlayerSteamId === userData.steamId) {
               myTurnGames[game.gameId] = { game, username, token };
             }
           } catch (error: any) {
             console.error(`Error checking if game ${game.gameId} is my turn:`, error);
             console.error(`Error details: ${error.message || 'Unknown error'}`);
             console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-            console.error(`userDataCache[token]:`, userDataCache[token]);
+            console.error(`userDataCache[token]:`, userDataMap[token]);
             console.error(`game.currentPlayerSteamId:`, game.currentPlayerSteamId);
           }
         }
@@ -426,28 +363,10 @@ async function updateTrayMenu() {
     let isMyTurn = false;
     for (const game of allGames) {
       for (const token of Object.values(tokens)) {
-        if (!userDataCache[token]) {
-          try {
-            userDataCache[token] = await pydtApi.getUserData(token);
-          } catch (error: any) {
-            console.error(`Error fetching user data for token:`, error);
-            console.error(`Error details: ${error.message || 'Unknown error'}`);
-            console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-            continue;
-          }
-        }
-        
-        try {
-          if (game.currentPlayerSteamId === userDataCache[token].steamId) {
-            isMyTurn = true;
-            break;
-          }
-        } catch (error: any) {
-          console.error(`Error checking if game ${game.gameId} is my turn:`, error);
-          console.error(`Error details: ${error.message || 'Unknown error'}`);
-          console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-          console.error(`userDataCache[token]:`, userDataCache[token]);
-          console.error(`game.currentPlayerSteamId:`, game.currentPlayerSteamId);
+        const userData = userDataMap[token];
+        if (userData && game.currentPlayerSteamId === userData.steamId) {
+          isMyTurn = true;
+          break;
         }
       }
       if (isMyTurn) break;
