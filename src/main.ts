@@ -20,6 +20,9 @@ let watchedGames: { [gameId: string]: {
   processedFiles: Set<string>
 }} = {};
 let userDataCache: { [token: string]: any } = {};
+let steamProfilesCache: { [steamId: string]: SteamProfile } = {};
+let steamProfilesCacheExpiry: number = 0;
+const STEAM_PROFILES_CACHE_DURATION = 180 * 60 * 1000; // 180 minutes in milliseconds
 
 function createTrayIcon(isMyTurn: boolean = false) {
   const size = 16;
@@ -288,25 +291,24 @@ async function updateTrayMenu() {
             console.error(`Unexpected response format from getGames for ${username}:`, response);
             continue;
           }
-          console.log(`Fetched games for ${username}:`, games);
+          console.log(`Fetched games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
         } else {
           try {
             games = await pydtApi.pollGames();
-            console.log(`Polled games for ${username}:`, games);
+            console.log(`Polled games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
           } catch (error) {
             console.error(`Error polling games for ${username}:`, error);
             // If polling fails, fall back to full games fetch
             const response = await pydtApi.getGames();
-            console.log(`Raw response from getGames after poll error for ${username}:`, response);
             if (Array.isArray(response)) {
               games = response;
             } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
               games = (response as any).data;
             } else {
-              console.error(`Unexpected response format from getGames after poll error for ${username}:`, response);
+              console.error(`Unexpected response format from getGames after poll error for ${username}`);
               continue;
             }
-            console.log(`Fetched games after poll error for ${username}:`, games);
+            console.log(`Fetched games after poll error for ${username}: ${games.map(g => g.displayName).join(', ')}`);
           }
         }
         
@@ -329,13 +331,23 @@ async function updateTrayMenu() {
         // Get unique steam IDs from all games
         const steamIds = [...new Set(games.map(game => game.currentPlayerSteamId))];
         if (steamIds.length > 0) {
-          const profiles = await pydtApi.getSteamProfiles(steamIds);
-          playerProfiles = {
-            ...playerProfiles,
-            ...profiles.reduce((acc, profile) => {
+          // Check if we need to refresh the Steam profiles cache
+          const now = Date.now();
+          if (now > steamProfilesCacheExpiry) {
+            // Cache expired, fetch new profiles
+            const profiles = await pydtApi.getSteamProfiles(steamIds);
+            steamProfilesCache = profiles.reduce((acc, profile) => {
               acc[profile.steamid] = profile;
               return acc;
-            }, {} as { [steamId: string]: SteamProfile })
+            }, {} as { [steamId: string]: SteamProfile });
+            steamProfilesCacheExpiry = now + STEAM_PROFILES_CACHE_DURATION;
+            console.log('Steam profiles cache refreshed');
+          }
+          
+          // Use cached profiles
+          playerProfiles = {
+            ...playerProfiles,
+            ...steamProfilesCache
           };
         }
       } catch (error) {
