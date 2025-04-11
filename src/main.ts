@@ -1,4 +1,4 @@
-import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell, Notification } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { createCanvas } from 'canvas';
@@ -16,8 +16,10 @@ let watchedGames: { [gameId: string]: {
   watcher: chokidar.FSWatcher,
   saveDir: string,
   token: string,
-  username: string
+  username: string,
+  processedFiles: Set<string>
 }} = {};
+let userDataCache: { [token: string]: any } = {};
 
 function createTrayIcon(isMyTurn: boolean = false) {
   const size = 16;
@@ -83,13 +85,31 @@ async function submitTurn(gameId: string, filePath: string, token: string): Prom
       }
     });
 
-    // Finish the submission
-    await pydtApi.finishTurnSubmit(gameId);
-    
-    console.log(`Turn submitted successfully for game ${gameId}`);
-    return true;
-  } catch (error) {
+    try {
+      // Finish the submission
+      await pydtApi.finishTurnSubmit(gameId);
+      console.log(`Turn submitted successfully for game ${gameId}`);
+      return true;
+    } catch (error: any) {
+      console.error(`Error finishing turn submission for game ${gameId}:`, error);
+      
+      // Show notification for finishSubmit failure
+      new Notification({
+        title: 'Turn Submission Failed',
+        body: `Failed to complete turn submission: ${error.message || 'Unknown error'}`
+      }).show();
+      
+      return false;
+    }
+  } catch (error: any) {
     console.error(`Error submitting turn for game ${gameId}:`, error);
+    
+    // Show notification for general submission failure
+    new Notification({
+      title: 'Turn Submission Failed',
+      body: `Failed to submit turn: ${error.message || 'Unknown error'}`
+    }).show();
+    
     return false;
   }
 }
@@ -111,10 +131,26 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
     watchedGames[game.gameId].watcher.close();
   }
 
+  // Get the current list of files in the directory
+  const existingFiles = new Set<string>();
+  if (fs.existsSync(saveDir)) {
+    const files = fs.readdirSync(saveDir);
+    files.forEach(file => {
+      if (file.endsWith('.Civ6Save')) {
+        existingFiles.add(path.join(saveDir, file));
+      }
+    });
+  }
+
   // Create a watcher for the save directory
   const watcher = chokidar.watch(saveDir, {
     ignored: /(^|[\/\\])\../, // ignore dotfiles
-    persistent: true
+    persistent: true,
+    ignoreInitial: true, // Don't trigger on initial scan
+    awaitWriteFinish: {
+      stabilityThreshold: 2000, // Wait 2 seconds after the last write
+      pollInterval: 100 // Check every 100ms
+    }
   });
 
   // Store the watcher and related info
@@ -122,19 +158,35 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
     watcher,
     saveDir,
     token,
-    username
+    username,
+    processedFiles: existingFiles // Initialize with existing files
   };
+
+  console.log(`Started watching for new save files in ${saveDir}`);
+  console.log(`Existing files: ${Array.from(existingFiles).join(', ')}`);
 
   // Watch for new files
   watcher.on('add', async (filePath: string) => {
-    // Check if the file is a Civilization VI save file
-    if (filePath.endsWith('.Civ6Save')) {
-      const success = await submitTurn(game.gameId, filePath, token);
-      if (success) {
-        // Stop watching after successful submission
-        watcher.close();
-        delete watchedGames[game.gameId];
-      }
+    // Check if the file is a Civilization VI save file and hasn't been processed yet
+    if (filePath.endsWith('.Civ6Save') && !watchedGames[game.gameId].processedFiles.has(filePath)) {
+      // Mark this file as processed to prevent duplicate uploads
+      watchedGames[game.gameId].processedFiles.add(filePath);
+      
+      console.log(`Processing new save file: ${filePath}`);
+      
+      // Wait a moment to ensure the file is fully written
+      setTimeout(async () => {
+        try {
+          const success = await submitTurn(game.gameId, filePath, token);
+          if (success) {
+            // Stop watching after successful submission
+            watcher.close();
+            delete watchedGames[game.gameId];
+          }
+        } catch (error) {
+          console.error(`Error processing file ${filePath}:`, error);
+        }
+      }, 1000);
     }
   });
 }
@@ -265,11 +317,12 @@ async function updateTrayMenu() {
           }
           
           // Check if this is our turn
-          if (game.inProgress) {
-            const userData = await pydtApi.getUserData();
-            if (game.currentPlayerSteamId === userData.steamId) {
-              myTurnGames[game.gameId] = { game, username, token };
-            }
+          // Only fetch user data if we don't have it cached
+          if (!userDataCache[token]) {
+            userDataCache[token] = await pydtApi.getUserData();
+          }
+          if (game.currentPlayerSteamId === userDataCache[token].steamId) {
+            myTurnGames[game.gameId] = { game, username, token };
           }
         }
 
@@ -290,15 +343,15 @@ async function updateTrayMenu() {
       }
     }
 
-    // Check if any in-progress games are waiting for any of our profiles' turns
+    // Check if any games are waiting for any of our profiles' turns
     let isMyTurn = false;
     for (const game of allGames) {
-      if (!game.inProgress) continue;
-      
       for (const token of Object.values(tokens)) {
-        pydtApi.setToken(token);
-        const userData = await pydtApi.getUserData();
-        if (game.currentPlayerSteamId === userData.steamId) {
+        if (!userDataCache[token]) {
+          pydtApi.setToken(token);
+          userDataCache[token] = await pydtApi.getUserData();
+        }
+        if (game.currentPlayerSteamId === userDataCache[token].steamId) {
           isMyTurn = true;
           break;
         }
@@ -314,8 +367,8 @@ async function updateTrayMenu() {
       {
         label: 'Games',
         submenu: [
-          ...(allGames.filter(game => game.inProgress).length > 0 
-            ? allGames.filter(game => game.inProgress).map(game => {
+          ...(allGames.length > 0 
+            ? allGames.map(game => {
                 const currentPlayer = playerProfiles[game.currentPlayerSteamId];
                 const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
                 const isDownloaded = downloadedTurns[game.gameId] ? ' [PYDT]' : '';
@@ -325,10 +378,16 @@ async function updateTrayMenu() {
                   label: `${game.displayName}${playerName}${isDownloaded}`,
                   click: async () => {
                     if (myTurnInfo) {
-                      // If it's our turn, download the turn
-                      const success = await downloadTurn(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
-                      if (success) {
-                        updateTrayMenu();
+                      // Check if this is a first turn
+                      if (game.round === 1) {
+                        // For first turns, just start watching without downloading
+                        startWatchingGame(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
+                      } else {
+                        // For regular turns, download first
+                        const success = await downloadTurn(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
+                        if (success) {
+                          updateTrayMenu();
+                        }
                       }
                     } else {
                       // If it's not our turn, open the game in browser
@@ -358,6 +417,8 @@ async function updateTrayMenu() {
       {
         label: 'Refresh All',
         click: async () => {
+          // Clear the user data cache before refreshing
+          userDataCache = {};
           for (const name of Object.keys(tokens)) {
             await refreshUserData(name);
           }

@@ -42,6 +42,7 @@ export interface PYDTGame {
   slots: number;
   humans: number;
   pollUrl?: string;
+  round: number;
 }
 
 export interface SteamProfile {
@@ -101,7 +102,7 @@ export class PYDTApi {
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       console.error('API error:', error);
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      throw new Error(`API request failed: ${response.status} ${response.statusText} ${JSON.stringify(error)}`);
     }
 
     const data = await response.json();
