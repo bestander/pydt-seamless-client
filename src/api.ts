@@ -68,23 +68,18 @@ interface TurnSubmitResponse {
 }
 
 export class PYDTApi {
-  private token: string | null = null;
   private baseUrl = 'https://api.playyourdamnturn.com';
   private pollUrl: string | null = null;
 
-  setToken(token: string) {
-    this.token = token;
-  }
-
-  private async request<T>(endpoint: string, options: RequestInit = {}, skipAuth: boolean = false): Promise<T> {
-    if (!this.token && !skipAuth) {
-      throw new Error('No token set');
+  private async request<T>(endpoint: string, token: string | null, options: RequestInit = {}, skipAuth: boolean = false): Promise<T> {
+    if (!token && !skipAuth) {
+      throw new Error('No token provided');
     }
 
     const headers = skipAuth
       ? { 'Content-Type': 'application/json' }
       : {
-          'Authorization': this.token!,
+          'Authorization': token!,
           'Content-Type': 'application/json',
           ...options.headers,
         };
@@ -145,15 +140,15 @@ export class PYDTApi {
     }
   }
 
-  async getUserData(): Promise<any> {
-    return this.request('/user/getCurrent');
+  async getUserData(token: string): Promise<any> {
+    return this.request('/user/getCurrent', token);
   }
 
-  async getGames(): Promise<PYDTGame[]> {
+  async getGames(token: string): Promise<PYDTGame[]> {
     console.log('Fetching games from API');
     try {
       console.log('Making request to /user/games');
-      const response = await this.request<{ data: PYDTGame[], pollUrl?: string }>('/user/games');
+      const response = await this.request<{ data: PYDTGame[], pollUrl?: string }>('/user/games', token);
       console.log('Raw response from /user/games:', response);
       
       if (!response) {
@@ -191,12 +186,12 @@ export class PYDTApi {
     }
   }
 
-  async getSteamProfiles(steamIds: string[]): Promise<SteamProfile[]> {
-    const response = await this.request<SteamProfile[]>(`/user/steamProfiles?steamIds=${steamIds.join(',')}`);
+  async getSteamProfiles(token: string, steamIds: string[]): Promise<SteamProfile[]> {
+    const response = await this.request<SteamProfile[]>(`/user/steamProfiles?steamIds=${steamIds.join(',')}`, token);
     return response;
   }
 
-  async pollGames(): Promise<PYDTGame[]> {
+  async pollGames(token: string): Promise<PYDTGame[]> {
     if (!this.pollUrl) {
       console.error('No poll URL available for polling games');
       throw new Error('No poll URL available');
@@ -205,7 +200,7 @@ export class PYDTApi {
     console.log(`Polling games using URL: ${this.pollUrl}`);
     
     try {
-      const response = await this.request<PYDTGame[]>(this.pollUrl, {}, true);
+      const response = await this.request<PYDTGame[]>(this.pollUrl, token, {}, true);
       console.log(`Successfully polled games, received ${Array.isArray(response) ? response.length : 'non-array'} games`);
       return response;
     } catch (error) {
@@ -217,18 +212,18 @@ export class PYDTApi {
     }
   }
 
-  async getTurnUrl(gameId: string): Promise<TurnInfo> {
-    return this.request<TurnInfo>(`/game/${gameId}/turn?compressed=yup`);
+  async getTurnUrl(token: string, gameId: string): Promise<TurnInfo> {
+    return this.request<TurnInfo>(`/game/${gameId}/turn?compressed=yup`, token);
   }
 
-  async startTurnSubmit(gameId: string): Promise<TurnSubmitResponse> {
-    return this.request(`/game/${gameId}/turn/startSubmit`, {
+  async startTurnSubmit(token: string, gameId: string): Promise<TurnSubmitResponse> {
+    return this.request(`/game/${gameId}/turn/startSubmit`, token, {
       method: 'POST'
     });
   }
 
-  async finishTurnSubmit(gameId: string): Promise<PYDTGame> {
-    return this.request(`/game/${gameId}/turn/finishSubmit`, {
+  async finishTurnSubmit(token: string, gameId: string): Promise<PYDTGame> {
+    return this.request(`/game/${gameId}/turn/finishSubmit`, token, {
       method: 'POST'
     });
   }

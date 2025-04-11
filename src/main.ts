@@ -69,11 +69,8 @@ function createTray() {
 
 async function submitTurn(gameId: string, filePath: string, token: string): Promise<boolean> {
   try {
-    // Set the token for API calls
-    pydtApi.setToken(token);
-
     // Get the upload URL
-    const submitResponse = await pydtApi.startTurnSubmit(gameId);
+    const submitResponse = await pydtApi.startTurnSubmit(token, gameId);
     
     // Read the file and compress it
     const fileBuffer = fs.readFileSync(filePath);
@@ -91,7 +88,7 @@ async function submitTurn(gameId: string, filePath: string, token: string): Prom
 
     try {
       // Finish the submission
-      await pydtApi.finishTurnSubmit(gameId);
+      await pydtApi.finishTurnSubmit(token, gameId);
       console.log(`Turn submitted successfully for game ${gameId}`);
       return true;
     } catch (error: any) {
@@ -198,8 +195,7 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
 async function downloadTurn(game: PYDTGame, username: string, token: string): Promise<boolean> {
   try {
     // Get the turn URL
-    pydtApi.setToken(token);
-    const turnInfo = await pydtApi.getTurnUrl(game.gameId);
+    const turnInfo = await pydtApi.getTurnUrl(token, game.gameId);
     
     // Create the filename (without .gz extension)
     const sanitizedGameName = game.displayName.replace(/[<>:"/\\|?*]/g, '_');
@@ -277,12 +273,10 @@ async function updateTrayMenu() {
     // Fetch games for each token
     for (const [username, token] of Object.entries(tokens)) {
       try {
-        pydtApi.setToken(token);
-        
         // If we have a poll URL, use it, otherwise do a full games fetch
         let games: PYDTGame[] = [];
         if (pollInterval === null) {
-          const response = await pydtApi.getGames();
+          const response = await pydtApi.getGames(token);
           console.log(`Raw response from getGames for ${username}:`, response);
           if (Array.isArray(response)) {
             games = response;
@@ -298,7 +292,7 @@ async function updateTrayMenu() {
           const hasPollUrl = pydtApi.hasPollUrl();
           if (hasPollUrl) {
             try {
-              games = await pydtApi.pollGames();
+              games = await pydtApi.pollGames(token);
               console.log(`Polled games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
             } catch (error: any) {
               console.error(`Error polling games for ${username}:`, error);
@@ -307,7 +301,7 @@ async function updateTrayMenu() {
               
               // If polling fails, fall back to full games fetch
               try {
-                const response = await pydtApi.getGames();
+                const response = await pydtApi.getGames(token);
                 if (Array.isArray(response)) {
                   games = response;
                 } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
@@ -327,7 +321,7 @@ async function updateTrayMenu() {
             // No poll URL available, do a full games fetch
             console.log(`No poll URL available for ${username}, doing full games fetch`);
             try {
-              const response = await pydtApi.getGames();
+              const response = await pydtApi.getGames(token);
               if (Array.isArray(response)) {
                 games = response;
               } else if (response && typeof response === 'object' && 'data' in response && Array.isArray((response as any).data)) {
@@ -363,7 +357,7 @@ async function updateTrayMenu() {
           // Only fetch user data if we don't have it cached
           if (!userDataCache[token]) {
             try {
-              userDataCache[token] = await pydtApi.getUserData();
+              userDataCache[token] = await pydtApi.getUserData(token);
               console.log(`Fetched user data for ${username}`);
             } catch (error: any) {
               console.error(`Error fetching user data for ${username}:`, error);
@@ -394,7 +388,7 @@ async function updateTrayMenu() {
           if (now > steamProfilesCacheExpiry) {
             // Cache expired, fetch new profiles
             try {
-              const profiles = await pydtApi.getSteamProfiles(steamIds);
+              const profiles = await pydtApi.getSteamProfiles(token, steamIds);
               steamProfilesCache = profiles.reduce((acc, profile) => {
                 acc[profile.steamid] = profile;
                 return acc;
@@ -434,8 +428,7 @@ async function updateTrayMenu() {
       for (const token of Object.values(tokens)) {
         if (!userDataCache[token]) {
           try {
-            pydtApi.setToken(token);
-            userDataCache[token] = await pydtApi.getUserData();
+            userDataCache[token] = await pydtApi.getUserData(token);
           } catch (error: any) {
             console.error(`Error fetching user data for token:`, error);
             console.error(`Error details: ${error.message || 'Unknown error'}`);

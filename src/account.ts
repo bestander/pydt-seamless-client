@@ -95,8 +95,7 @@ export async function addUser(): Promise<boolean> {
       if (value) {
         try {
           // Test the token by trying to get user data
-          pydtApi.setToken(value);
-          const userData = await pydtApi.getUserData();
+          const userData = await pydtApi.getUserData(value);
           
           console.log('Received user data:', userData);
           
@@ -226,8 +225,7 @@ export async function refreshUserData(tokenName: string) {
       return null;
     }
 
-    pydtApi.setToken(token);
-    const userData = await pydtApi.getUserData();
+    const userData = await pydtApi.getUserData(token);
     const currentUserData = store.get('userData', {});
     if (userData) {
       store.set('userData', {
