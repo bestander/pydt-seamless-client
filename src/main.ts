@@ -398,7 +398,7 @@ async function updateTrayMenu() {
           }
 
           // Get unique steam IDs from all games
-          const steamIds = [...new Set(games.map(game => game.currentPlayerSteamId))];
+          const steamIds = [...new Set(games.flatMap(game => game.players.map(player => player.steamId)))];
           if (steamIds.length > 0) {
             // Check if we need to refresh the Steam profiles cache
             const now = Date.now();
