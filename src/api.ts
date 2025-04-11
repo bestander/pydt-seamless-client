@@ -43,6 +43,7 @@ export interface PYDTGame {
   humans: number;
   pollUrl?: string;
   round: number;
+  gameTurnRangeKey: number;
 }
 
 export interface SteamProfile {

@@ -379,7 +379,7 @@ async function updateTrayMenu() {
                   click: async () => {
                     if (myTurnInfo) {
                       // Check if this is a first turn
-                      if (game.round === 1) {
+                      if (game.gameTurnRangeKey === 1) {
                         // For first turns, just start watching without downloading
                         startWatchingGame(myTurnInfo.game, myTurnInfo.username, myTurnInfo.token);
                       } else {
