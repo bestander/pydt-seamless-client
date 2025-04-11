@@ -140,10 +140,14 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
     return;
   }
 
-  // If we're already watching this game, stop watching it
-  if (watchedGames[game.gameId]) {
-    watchedGames[game.gameId].watcher.close();
+  // Stop any existing watchers before starting a new one
+  for (const [gameId, gameInfo] of Object.entries(watchedGames)) {
+    console.log(`Stopping watcher for game ${gameId}`);
+    gameInfo.watcher.close();
+    delete watchedGames[gameId];
   }
+  // Update the menu to remove all hourglasses
+  updateTrayMenu();
 
   // Get the current list of files in the directory
   const existingFiles = new Set<string>();
@@ -196,6 +200,8 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
             // Stop watching after successful submission
             watcher.close();
             delete watchedGames[game.gameId];
+            // Update the tray menu to remove the hourglass
+            updateTrayMenu();
           }
         } catch (error) {
           console.error(`Error processing file ${filePath}:`, error);
