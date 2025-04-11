@@ -25,16 +25,22 @@ let steamProfilesCache: { [steamId: string]: SteamProfile } = {};
 let steamProfilesCacheExpiry: number = 0;
 const STEAM_PROFILES_CACHE_DURATION = 180 * 60 * 1000; // 180 minutes in milliseconds
 
-function createTrayIcon(isMyTurn: boolean = false) {
+function createTrayIcon(isMyTurn: boolean = false, isWatching: boolean = false) {
   const size = 16;
   const canvas = createCanvas(size, size);
   const ctx = canvas.getContext('2d');
   
   // Draw background
-  ctx.fillStyle = isMyTurn ? '#ff0000' : '#006400'; // Red if my turn, dark green if not
+  if (isWatching) {
+    ctx.fillStyle = '#FFD700'; // Golden-yellow for watching
+  } else if (isMyTurn) {
+    ctx.fillStyle = '#ff0000'; // Red if my turn
+  } else {
+    ctx.fillStyle = '#006400'; // Dark green if not
+  }
   ctx.fillRect(0, 0, size, size);
 
-  // Draw "VI" text
+  // Draw text
   ctx.fillStyle = '#ffffff'; // White text
   ctx.font = 'bold 10px Arial';
   ctx.textAlign = 'center';
@@ -391,7 +397,8 @@ async function updateTrayMenu() {
     }
 
     // Update tray icon based on turn status
-    const iconPath = createTrayIcon(isMyTurn);
+    const isWatching = Object.keys(watchedGames).length > 0;
+    const iconPath = createTrayIcon(isMyTurn, isWatching);
     tray.setImage(iconPath);
 
     const contextMenu = Menu.buildFromTemplate([
