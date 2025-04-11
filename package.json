@@ -18,8 +18,10 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "@types/chokidar": "^1.7.5",
     "axios": "^1.8.4",
     "canvas": "^3.1.0",
+    "chokidar": "^4.0.3",
     "electron-store": "^8.1.0"
   },
   "build": {

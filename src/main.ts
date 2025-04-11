@@ -7,10 +7,17 @@ import { addUser, getStore, refreshUserData } from './account';
 import * as os from 'os';
 import * as https from 'https';
 import * as zlib from 'zlib';
+import * as chokidar from 'chokidar';
 
 let tray: Tray | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
 let downloadedTurns: { [gameId: string]: boolean } = {};
+let watchedGames: { [gameId: string]: { 
+  watcher: chokidar.FSWatcher,
+  saveDir: string,
+  token: string,
+  username: string
+}} = {};
 
 function createTrayIcon(isMyTurn: boolean = false) {
   const size = 16;
@@ -52,6 +59,84 @@ function createTray() {
   } catch (error) {
     console.error('Error creating tray:', error);
   }
+}
+
+async function submitTurn(gameId: string, filePath: string, token: string): Promise<boolean> {
+  try {
+    // Set the token for API calls
+    pydtApi.setToken(token);
+
+    // Get the upload URL
+    const submitResponse = await pydtApi.startTurnSubmit(gameId);
+    
+    // Read the file and compress it
+    const fileBuffer = fs.readFileSync(filePath);
+    const compressedBuffer = zlib.gzipSync(fileBuffer);
+
+    // Upload the compressed file
+    await fetch(submitResponse.putUrl, {
+      method: 'PUT',
+      body: compressedBuffer,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Encoding': 'gzip'
+      }
+    });
+
+    // Finish the submission
+    await pydtApi.finishTurnSubmit(gameId);
+    
+    console.log(`Turn submitted successfully for game ${gameId}`);
+    return true;
+  } catch (error) {
+    console.error(`Error submitting turn for game ${gameId}:`, error);
+    return false;
+  }
+}
+
+function startWatchingGame(game: PYDTGame, username: string, token: string) {
+  // Determine the save directory based on OS
+  let saveDir = '';
+  if (process.platform === 'darwin') {
+    saveDir = path.join(os.homedir(), 'Library', 'Application Support', 'Sid Meier\'s Civilization VI', 'Sid Meier\'s Civilization VI', 'Saves', 'Hotseat');
+  } else if (process.platform === 'win32') {
+    saveDir = path.join(os.homedir(), 'Documents', 'My Games', 'Sid Meier\'s Civilization VI', 'Saves', 'Hotseat');
+  } else {
+    console.error('Unsupported platform for watching turns');
+    return;
+  }
+
+  // If we're already watching this game, stop watching it
+  if (watchedGames[game.gameId]) {
+    watchedGames[game.gameId].watcher.close();
+  }
+
+  // Create a watcher for the save directory
+  const watcher = chokidar.watch(saveDir, {
+    ignored: /(^|[\/\\])\../, // ignore dotfiles
+    persistent: true
+  });
+
+  // Store the watcher and related info
+  watchedGames[game.gameId] = {
+    watcher,
+    saveDir,
+    token,
+    username
+  };
+
+  // Watch for new files
+  watcher.on('add', async (filePath: string) => {
+    // Check if the file is a Civilization VI save file
+    if (filePath.endsWith('.Civ6Save')) {
+      const success = await submitTurn(game.gameId, filePath, token);
+      if (success) {
+        // Stop watching after successful submission
+        watcher.close();
+        delete watchedGames[game.gameId];
+      }
+    }
+  });
 }
 
 async function downloadTurn(game: PYDTGame, username: string, token: string): Promise<boolean> {
@@ -99,6 +184,7 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
           file.close();
           console.log(`Turn downloaded and decompressed successfully: ${filePath}`);
           downloadedTurns[game.gameId] = true;
+          startWatchingGame(game, username, token);
           resolve(true);
         });
       }).on('error', (err) => {
@@ -320,4 +406,10 @@ app.on('before-quit', () => {
     clearInterval(pollInterval);
     pollInterval = null;
   }
+  
+  // Close all file watchers
+  Object.values(watchedGames).forEach(({ watcher }) => {
+    watcher.close();
+  });
+  watchedGames = {};
 }); 

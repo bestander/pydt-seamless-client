@@ -61,6 +61,10 @@ export interface TurnInfo {
   version: string;
 }
 
+interface TurnSubmitResponse {
+  putUrl: string;
+}
+
 export class PYDTApi {
   private token: string | null = null;
   private baseUrl = 'https://api.playyourdamnturn.com';
@@ -132,6 +136,18 @@ export class PYDTApi {
 
   async getTurnUrl(gameId: string): Promise<TurnInfo> {
     return this.request<TurnInfo>(`/game/${gameId}/turn?compressed=yup`);
+  }
+
+  async startTurnSubmit(gameId: string): Promise<TurnSubmitResponse> {
+    return this.request(`/game/${gameId}/turn/startSubmit`, {
+      method: 'POST'
+    });
+  }
+
+  async finishTurnSubmit(gameId: string): Promise<PYDTGame> {
+    return this.request(`/game/${gameId}/turn/finishSubmit`, {
+      method: 'POST'
+    });
   }
 }
 
