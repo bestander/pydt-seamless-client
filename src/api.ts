@@ -114,7 +114,6 @@ export class PYDTApi {
       let data;
       try {
         data = await response.json();
-        console.log(`API response data for ${url}:`, data);
       } catch (e: any) {
         console.error(`Error parsing JSON response from ${url}:`, e);
         throw new Error(`Failed to parse JSON response: ${e.message}`);
@@ -149,7 +148,6 @@ export class PYDTApi {
     try {
       console.log('Making request to /user/games');
       const response = await this.request<{ data: PYDTGame[], pollUrl?: string }>('/user/games', token);
-      console.log('Raw response from /user/games:', response);
       
       if (!response) {
         console.error('Empty response from /user/games');
@@ -164,7 +162,7 @@ export class PYDTApi {
       }
       
       if (!response.data) {
-        console.error('No data property in response:', response);
+        console.error('No data property in response from /user/games');
         throw new Error('No data property in response from /user/games');
       }
       

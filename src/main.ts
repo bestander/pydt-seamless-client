@@ -90,6 +90,19 @@ async function submitTurn(gameId: string, filePath: string, token: string): Prom
       // Finish the submission
       await pydtApi.finishTurnSubmit(token, gameId);
       console.log(`Turn submitted successfully for game ${gameId}`);
+      
+      // Do a fresh poll of the game after successful submission
+      try {
+        console.log(`Polling game ${gameId} after turn submission`);
+        const games = await pydtApi.getGames(token);
+        const updatedGame = games.find(g => g.gameId === gameId);
+        if (updatedGame) {
+          console.log(`Game ${gameId} updated after submission. Current player: ${updatedGame.currentPlayerSteamId}`);
+        }
+      } catch (pollError: any) {
+        console.error(`Error polling game ${gameId} after submission:`, pollError);
+      }
+      
       return true;
     } catch (error: any) {
       console.error(`Error finishing turn submission for game ${gameId}:`, error);
@@ -293,7 +306,6 @@ async function updateTrayMenu() {
       try {
         console.log(`No poll URL available for ${username}, doing full games fetch`);
         const games = await pydtApi.getGames(token);
-        console.log(`Raw response from getGames for ${username}:`, JSON.stringify(games));
         console.log(`Fetched games for ${username}: ${games.map(g => g.displayName).join(', ')}`);
 
         // Add games to the collection, avoiding duplicates by gameId
@@ -384,11 +396,11 @@ async function updateTrayMenu() {
             ? allGames.map(game => {
                 const currentPlayer = playerProfiles[game.currentPlayerSteamId];
                 const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
-                const isDownloaded = downloadedTurns[game.gameId] ? ' [PYDT]' : '';
                 const myTurnInfo = myTurnGames[game.gameId];
+                const isWatching = watchedGames[game.gameId] ? ' ⌛' : ''; // Add hourglass only for games being watched
                 
                 return {
-                  label: `${game.displayName}${playerName}${isDownloaded}`,
+                  label: `${game.displayName}${playerName}${isWatching}`,
                   click: async () => {
                     if (myTurnInfo) {
                       // Check if this is a first turn
