@@ -85,13 +85,10 @@ export class PYDTApi {
         };
 
     const url = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
-    console.log(`Making API request to ${url}`);
-    console.log(`Request method: ${options.method || 'GET'}`);
-    console.log(`Skip auth: ${skipAuth}`);
-    console.log(`Headers: ${JSON.stringify(headers)}`);
 
     try {
       console.log(`Sending fetch request to ${url}`);
+      console.log(`Headers: ${JSON.stringify(headers)}`);
       const response = await fetch(url, {
         ...options,
         headers,
@@ -110,7 +107,6 @@ export class PYDTApi {
         throw new Error(`API request failed: ${response.status} ${response.statusText} ${JSON.stringify(errorData)}`);
       }
 
-      console.log(`Parsing JSON response from ${url}`);
       let data;
       try {
         data = await response.json();
