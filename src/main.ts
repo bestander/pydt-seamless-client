@@ -108,70 +108,10 @@ async function submitTurn(game: PYDTGame, username: string, token: string, fileP
       }
     });
     
-    
     // Finish the turn submission
     const finishResponse = await pydtApi.finishTurnSubmit(token, game.gameId);
     console.log('Finish turn submit response:', finishResponse);
-    
-    // After successful turn submission, fetch games to get the new poll URL
-    try {
-      // Check if we have a cached poll URL
-      if (userStateCache[token]?.pollUrl) {
-        try {
-          // Use the cached poll URL to get games
-          const response = await fetch(userStateCache[token].pollUrl!);
-          if (response.ok) {
-            const games = await response.json();
-            console.log(`Fetched ${games.length} games from poll URL after turn submission`);
-            
-            // Update the poll URL cache if a new poll URL is returned
-            if (games.length > 0 && games[0].pollUrl) {
-              userStateCache[token] = {
-                ...userStateCache[token],
-                pollUrl: games[0].pollUrl
-              };
-              console.log(`Updated poll URL cache after turn submission: ${userStateCache[token].pollUrl}`);
-            }
-          } else {
-            throw new Error(`Poll URL request failed: ${response.status}`);
-          }
-        } catch (pollError: any) {
-          console.error(`Error using poll URL after turn submission:`, pollError);
-          // If poll URL fails, fall back to full games fetch
-          const gamesData = await pydtApi.getGames(token);
-          const games = gamesData.data;
-          
-          // Update the poll URL cache if a new poll URL is returned
-          if (games.length > 0 && gamesData.pollUrl) {
-            userStateCache[token] = {
-              ...userStateCache[token],
-              pollUrl: gamesData.pollUrl
-            };
-            console.log(`Updated poll URL cache after turn submission: ${userStateCache[token].pollUrl}`);
-          }
-        }
-      } else {
-        // No cached poll URL, do a full games fetch
-        const gamesData = await pydtApi.getGames(token);
-        const games = gamesData.data;
-        
-        // Update the poll URL cache if a poll URL is returned
-        if (games.length > 0 && gamesData.pollUrl) {
-          userStateCache[token] = {
-            ...userStateCache[token],
-            pollUrl: gamesData.pollUrl
-          };
-          console.log(`Cached poll URL after turn submission: ${userStateCache[token].pollUrl}`);
-        }
-      }
-      
-      // Update the tray menu to reflect the new state
-      updateTrayMenu();
-    } catch (error: any) {
-      console.error('Error fetching games after turn submission:', error);
-      console.error(`Error details: ${error.message || 'Unknown error'}`);
-      console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-    }
+    updateTrayMenu();
     
     return true;
   } catch (error: any) {
@@ -326,75 +266,6 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
   } catch (error) {
     console.error(`Error downloading turn for game ${game.gameId}:`, error);
     return false;
-  }
-}
-
-async function downloadAndProcessTurn(turnInfo: TurnInfo): Promise<any> {
-  try {
-    console.log(`Downloading turn data from ${turnInfo.getUrl}`);
-    
-    // Download the turn data with a timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-    
-    try {
-      const response = await fetch(turnInfo.getUrl, {
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to download turn: ${response.status} ${response.statusText}`);
-      }
-      
-      // Get the compressed data
-      const compressedData = await response.arrayBuffer();
-      
-      // Decompress the data
-      const decompressedData = zlib.gunzipSync(Buffer.from(compressedData));
-      
-      // Parse the JSON data
-      return JSON.parse(decompressedData.toString());
-    } catch (fetchError: any) {
-      clearTimeout(timeoutId);
-      
-      if (fetchError.name === 'AbortError') {
-        throw new Error('Turn download timed out after 30 seconds');
-      }
-      
-      if (fetchError.code === 'ECONNREFUSED' || fetchError.code === 'ENOTFOUND') {
-        throw new Error(`Network error: ${fetchError.message}`);
-      }
-      
-      throw fetchError;
-    }
-  } catch (error: any) {
-    console.error('Error downloading and processing turn:', error);
-    console.error(`Error details: ${error.message || 'Unknown error'}`);
-    console.error(`Error stack: ${error.stack || 'No stack trace'}`);
-    
-    // If it's a network error, try one more time after a short delay
-    if (error.message.includes('Network error') || error.message.includes('timed out')) {
-      console.log('Retrying turn download after network error...');
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-      
-      try {
-        const response = await fetch(turnInfo.getUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to download turn on retry: ${response.status} ${response.statusText}`);
-        }
-        
-        const compressedData = await response.arrayBuffer();
-        const decompressedData = zlib.gunzipSync(Buffer.from(compressedData));
-        return JSON.parse(decompressedData.toString());
-      } catch (retryError: any) {
-        console.error('Error on retry:', retryError);
-        return null;
-      }
-    }
-    
-    return null;
   }
 }
 
