@@ -70,7 +70,7 @@ function createTray() {
     
     // Create the tray with the icon
     tray = new Tray(iconPath);
-    tray.setToolTip('PYDT Super Client');
+    tray.setToolTip('Mini-PYDT');
     
     console.log('Tray created successfully');
   } catch (error) {
@@ -205,7 +205,7 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
     
     // Create the filename (without .gz extension)
     const sanitizedGameName = game.displayName.replace(/[<>:"/\\|?*]/g, '_');
-    const filename = `!PYDT-${sanitizedGameName}-${username}.Civ6Save`;
+    const filename = `!GO!-${username}-${sanitizedGameName}.Civ6Save`;
     
     // Get the save directory
     const saveDir = getSaveDirectory();

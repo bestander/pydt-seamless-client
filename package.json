@@ -1,7 +1,7 @@
 {
-  "name": "pydt-super-client",
+  "name": "pydt-tray",
   "version": "1.0.0",
-  "description": "Desktop application for PYDT integration",
+  "description": "Minimalist desktop application for PYDT integration",
   "main": "dist/main.js",
   "scripts": {
     "start": "electron .",
