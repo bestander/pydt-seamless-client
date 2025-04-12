@@ -56,6 +56,11 @@ export interface SteamProfile {
   vacationMode: boolean;
 }
 
+export interface UserData {
+  displayName: string;
+  steamId: string;
+}
+
 export interface TurnInfo {
   getUrl: string;
   putUrl: string;
@@ -79,7 +84,7 @@ export class PYDTApi {
     this.logger = logger;
   }
 
-  async getUserData(token: string): Promise<any> {
+  async getUserData(token: string): Promise<UserData> {
     this.logger.log(`Making request to ${this.baseUrl}/user/getCurrent`);
     const response = await fetch(`${this.baseUrl}/user/getCurrent`, {
       method: 'GET',
@@ -175,25 +180,6 @@ export class PYDTApi {
     return response.json();
   }
 
-  async submitTurn(token: string, gameId: string, turnData: any): Promise<any> {
-    this.logger.log(`Making request to ${this.baseUrl}/game/submitTurn`);
-    const response = await fetch(`${this.baseUrl}/game/submitTurn`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        gameId,
-        ...turnData
-      })
-    });
-    this.logger.log(`Response status for ${this.baseUrl}/game/submitTurn: ${response.status} ${response.statusText}`);
-    if (!response.ok) {
-      throw new Error(`Failed to submit turn: ${response.status} ${response.statusText}`);
-    }
-    return response.json();
-  }
 }
 
 export const pydtApi = new PYDTApi(PYDT_API_BASE_URL, console); 

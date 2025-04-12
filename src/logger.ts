@@ -13,6 +13,28 @@ const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 const originalConsoleInfo = console.info;
 
+let updateSteamProfilesCacheCallback: ((cache: any) => void) | null = null;
+
+export function setSteamProfilesCacheCallback(callback: (cache: any) => void) {
+  updateSteamProfilesCacheCallback = callback;
+}
+
+export function updateSteamProfilesCache(cache: any) {
+  if (updateSteamProfilesCacheCallback) {
+    updateSteamProfilesCacheCallback(cache);
+    originalConsoleLog('Steam profiles cache updated in logger:', Object.keys(cache).length, 'profiles');
+    
+    // Log the actual profiles for debugging - but don't use filterGameData here
+    const profileList = Object.keys(cache).map(steamId => {
+      const profile = cache[steamId];
+      return `${steamId}: ${profile.personaname}`;
+    });
+    originalConsoleLog('Steam profiles in logger cache:', profileList);
+  } else {
+    originalConsoleLog('Warning: Steam profiles cache callback not set');
+  }
+}
+
 // Function to filter game data to only include specific keys
 function filterGameData(data: any): any {
   // If data is null or undefined, return as is
@@ -257,22 +279,6 @@ export function initializeLogger() {
   // Make the steamProfilesCache available to the filterGameData function
   (global as any).steamProfilesCache = {};
   
-  // Function to update the steamProfilesCache
-  const updateSteamProfilesCache = (cache: any) => {
-    (global as any).steamProfilesCache = cache;
-    originalConsoleLog('Steam profiles cache updated in logger:', Object.keys(cache).length, 'profiles');
-    
-    // Log the actual profiles for debugging - but don't use filterGameData here
-    const profileList = Object.keys(cache).map(steamId => {
-      const profile = cache[steamId];
-      return `${steamId}: ${profile.personaname}`;
-    });
-    originalConsoleLog('Steam profiles in logger cache:', profileList);
-  };
-  
-  // Expose the updateSteamProfilesCache function to the global scope
-  (global as any).updateSteamProfilesCache = updateSteamProfilesCache;
-  
   // Log that the logger has been initialized
   originalConsoleLog('Logger initialized with steamProfilesCache');
   
@@ -376,11 +382,6 @@ export function initializeLogger() {
   
   // Override console.log
   console.log = (...args) => {
-    // Check if this is a steamProfiles API request log
-    const isSteamProfilesRequest = args.some(arg => 
-      typeof arg === 'string' && arg.includes('api.playyourdamnturn.com/user/steamProfiles')
-    );
-    
     // Filter game data if present
     const filteredArgs = safeFilterArgs(args);
     
@@ -398,10 +399,6 @@ export function initializeLogger() {
 
   // Override console.error
   console.error = (...args) => {
-    // Check if this is a steamProfiles API request log
-    const isSteamProfilesRequest = args.some(arg => 
-      typeof arg === 'string' && arg.includes('api.playyourdamnturn.com/user/steamProfiles')
-    );
     
     // Filter game data if present
     const filteredArgs = safeFilterArgs(args);
@@ -420,10 +417,6 @@ export function initializeLogger() {
 
   // Override console.warn
   console.warn = (...args) => {
-    // Check if this is a steamProfiles API request log
-    const isSteamProfilesRequest = args.some(arg => 
-      typeof arg === 'string' && arg.includes('api.playyourdamnturn.com/user/steamProfiles')
-    );
     
     // Filter game data if present
     const filteredArgs = safeFilterArgs(args);
@@ -442,10 +435,6 @@ export function initializeLogger() {
 
   // Override console.info
   console.info = (...args) => {
-    // Check if this is a steamProfiles API request log
-    const isSteamProfilesRequest = args.some(arg => 
-      typeof arg === 'string' && arg.includes('api.playyourdamnturn.com/user/steamProfiles')
-    );
     
     // Filter game data if present
     const filteredArgs = safeFilterArgs(args);
