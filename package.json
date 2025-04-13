@@ -1,5 +1,5 @@
 {
-  "name": "pydt-tray",
+  "name": "pydt-mini",
   "version": "1.0.0",
   "description": "Minimalist desktop application for PYDT integration",
   "main": "dist/main.js",
@@ -20,21 +20,42 @@
   "dependencies": {
     "@types/chokidar": "^1.7.5",
     "axios": "^1.8.4",
-    "canvas": "^3.1.0",
     "chokidar": "^4.0.3",
     "electron-store": "^8.1.0"
   },
   "build": {
-    "appId": "com.pydt.superclient",
+    "appId": "com.pydt.mini",
     "mac": {
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "target": ["dmg"],
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "entitlements": null,
+      "entitlementsInherit": null
     },
     "win": {
       "target": "nsis"
     },
     "files": [
       "dist/**/*",
-      "package.json"
-    ]
+      "package.json",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "removePackageScripts": true,
+    "removePackageKeywords": true,
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    }
   }
 }

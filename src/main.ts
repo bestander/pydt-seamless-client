@@ -1,7 +1,6 @@
 import { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, shell, Notification } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { createCanvas } from 'canvas';
 import { pydtApi, PYDTGame, SteamProfile, TurnInfo } from './api';
 import { addUser, getStore, refreshUserData } from './account';
 import * as https from 'https';
@@ -34,43 +33,31 @@ interface UserState {
 }
 
 function createTrayIcon(isMyTurn: boolean = false, isWatching: boolean = false) {
-  const size = 16;
-  const canvas = createCanvas(size, size);
-  const ctx = canvas.getContext('2d');
-  
-  // Draw background
-  if (isWatching) {
-    ctx.fillStyle = '#FFD700'; // Golden-yellow for watching
-  } else if (isMyTurn) {
-    ctx.fillStyle = '#ff0000'; // Red if my turn
-  } else {
-    ctx.fillStyle = '#006400'; // Dark green if not
-  }
-  ctx.fillRect(0, 0, size, size);
-
-  // Draw text
-  ctx.fillStyle = '#ffffff'; // White text
-  ctx.font = 'bold 10px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('VI', size/2, size/2);
-
-  // Save to file
+  // Use the pre-rendered icon from assets
   const iconPath = path.join(__dirname, '..', 'assets', 'tray-icon.png');
-  const buffer = canvas.toBuffer('image/png');
-  fs.writeFileSync(iconPath, buffer);
   
-  return iconPath;
+  // Create native image from file
+  const icon = nativeImage.createFromPath(iconPath);
+  
+  // Resize the icon to the correct size
+  return icon.resize({ width: 16, height: 16 });
 }
 
 function createTray() {
   try {
-    // Create and save the icon
-    const iconPath = createTrayIcon();
-    
     // Create the tray with the icon
-    tray = new Tray(iconPath);
+    const icon = createTrayIcon();
+    tray = new Tray(icon);
     tray.setToolTip('Mini-PYDT');
+    
+    // Create the context menu
+    const contextMenu = Menu.buildFromTemplate([
+      { label: 'Open Log', click: () => openLogWindow() },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() }
+    ]);
+    
+    tray.setContextMenu(contextMenu);
     
     console.log('Tray created successfully');
   } catch (error) {
@@ -437,8 +424,8 @@ async function updateTrayMenu() {
 
       // Update tray icon based on turn status
       const isWatching = watchedGame !== null;
-      const iconPath = createTrayIcon(isMyTurn, isWatching);
-      tray.setImage(iconPath);
+      const icon = createTrayIcon(isMyTurn, isWatching);
+      tray.setImage(icon);
 
       // Create the games submenu
       const gamesSubmenu = allGames.length > 0 
