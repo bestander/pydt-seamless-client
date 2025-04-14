@@ -111,19 +111,16 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
               [userData.displayName]: userData
             });
             
-            // Refresh user data after adding
-            await refreshUserData(userData.displayName);
+            // Close the window
+            if (win && !win.isDestroyed()) {
+              win.close();
+            }
             
             // Call the callback function if provided
             if (onAccountChange) {
-              try {
-                onAccountChange();
-              } catch (error) {
-                console.error('Error in account change callback:', error);
-              }
+              onAccountChange();
             }
             
-            win.close();
             resolve(true);
           } else {
             console.error('Invalid user data structure:', userData);
@@ -159,7 +156,13 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
                 <p>Please make sure you've copied the correct token from your <a href="#" onclick="openProfile(); return false;">profile page</a>.</p>
                 <button onclick="window.close()">OK</button>
                 <script>
-                  document.querySelector('button').onclick = () => require('electron').remote.getCurrentWindow().close();
+                  document.querySelector('button').onclick = () => {
+                    if (window.close) {
+                      window.close();
+                    } else {
+                      require('electron').ipcRenderer.send('close-error-window');
+                    }
+                  };
                   function openProfile() {
                     require('electron').shell.openExternal('https://www.playyourdamnturn.com/user/profile');
                   }
@@ -169,10 +172,20 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
           `;
 
           errorWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml)}`);
+          
+          // Add a handler for closing the error window
+          ipcMain.once('close-error-window', () => {
+            if (errorWin && !errorWin.isDestroyed()) {
+              errorWin.close();
+            }
+          });
+          
           resolve(false);
         }
       } else {
-        win.close();
+        if (win && !win.isDestroyed()) {
+          win.close();
+        }
         resolve(false);
       }
     });
@@ -188,11 +201,7 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
       
       // Call the callback function if provided
       if (onAccountChange) {
-        try {
-          onAccountChange();
-        } catch (error) {
-          console.error('Error in account change callback:', error);
-        }
+        onAccountChange();
       }
       
       // Check if window exists and is not destroyed before updating
@@ -220,7 +229,7 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
           }
         });
         
-        // Close the dialog after a short delay to allow the UI to update
+        // Close the window after a short delay to allow the UI to update
         setTimeout(() => {
           if (win && !win.isDestroyed()) {
             win.close();

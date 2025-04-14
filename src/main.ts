@@ -289,6 +289,7 @@ async function updateTrayMenu() {
     console.log('Tray update already in progress, waiting for it to complete...');
     try {
       await currentTrayUpdatePromise;
+      console.log('Previous tray update completed, proceeding with new update');
     } catch (error) {
       console.error('Error waiting for previous tray update:', error);
       // Continue with the new update even if the previous one failed
@@ -298,6 +299,10 @@ async function updateTrayMenu() {
   // Create a new promise for this update
   currentTrayUpdatePromise = (async () => {
     try {
+      // Clear the user state cache to ensure we get fresh data
+      console.log('Clearing user state cache to ensure fresh data');
+      userStateCache = {};
+      
       const tokens = getStore().get('tokens') as { [key: string]: string };
       console.log(`Tokens: ${JSON.stringify(tokens)}`);
       const allGames: PYDTGame[] = [];
@@ -309,6 +314,7 @@ async function updateTrayMenu() {
         try {
           // Check if we have cached user data
           if (!userStateCache[token]) {
+            console.log(`Fetching user data for ${username} (not in cache)`);
             const userData = await pydtApi.getUserData(token);
             userStateCache[token] = {
               username,
@@ -546,14 +552,8 @@ async function updateTrayMenu() {
               console.log('Account changed, refreshing tray menu');
               // Clear the user data cache to force a refresh
               userStateCache = {};
-              // Update the tray menu with error handling
-              try {
-                updateTrayMenu().catch(error => {
-                  console.error('Error updating tray menu after account change:', error);
-                });
-              } catch (error) {
-                console.error('Error initiating tray menu update:', error);
-              }
+              // Update the tray menu
+              updateTrayMenu();
             });
           }
         }
