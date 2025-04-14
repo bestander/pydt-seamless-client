@@ -476,6 +476,15 @@ async function updateTrayMenu() {
             return {
               label: `${game.displayName}${playerName}${isWatching}`,
               click: async () => {
+                // If the game is already being watched, stop watching it
+                if (watchedGame && watchedGame.gameId === game.gameId) {
+                  console.log(`Stopping watcher for game ${game.displayName}`);
+                  watchedGame.watcher.close();
+                  watchedGame = null;
+                  updateTrayMenu();
+                  return;
+                }
+                
                 if (myTurnInfo) {
                   // Check if this is a first turn
                   if (game.gameTurnRangeKey === 1) {
