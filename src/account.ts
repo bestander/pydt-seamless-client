@@ -4,14 +4,12 @@ import { pydtApi, PYDTUser } from './api';
 
 interface AppState {
   tokens: { [name: string]: string };  // name -> token mapping
-  selectedToken: string | null;
   userData: { [token: string]: PYDTUser };
 }
 
 const store = new Store<AppState>({
   defaults: {
     tokens: {},
-    selectedToken: null,
     userData: {}
   }
 });
@@ -20,7 +18,7 @@ export function getStore(): Store<AppState> {
   return store;
 }
 
-export async function addUser(): Promise<boolean> {
+export async function addUser(onAccountChange?: () => void): Promise<boolean> {
   const tokens = store.get('tokens', {});
   const userList = Object.keys(tokens).map(username => `
     <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
@@ -113,11 +111,17 @@ export async function addUser(): Promise<boolean> {
               [userData.displayName]: userData
             });
             
-            // Set selected token
-            store.set('selectedToken', userData.displayName);
-            
             // Refresh user data after adding
             await refreshUserData(userData.displayName);
+            
+            // Call the callback function if provided
+            if (onAccountChange) {
+              try {
+                onAccountChange();
+              } catch (error) {
+                console.error('Error in account change callback:', error);
+              }
+            }
             
             win.close();
             resolve(true);
@@ -182,8 +186,13 @@ export async function addUser(): Promise<boolean> {
       delete userData[username];
       store.set('userData', userData);
       
-      if (store.get('selectedToken') === username) {
-        store.delete('selectedToken');
+      // Call the callback function if provided
+      if (onAccountChange) {
+        try {
+          onAccountChange();
+        } catch (error) {
+          console.error('Error in account change callback:', error);
+        }
       }
       
       // Check if window exists and is not destroyed before updating
@@ -210,6 +219,13 @@ export async function addUser(): Promise<boolean> {
             win.reload();
           }
         });
+        
+        // Close the dialog after a short delay to allow the UI to update
+        setTimeout(() => {
+          if (win && !win.isDestroyed()) {
+            win.close();
+          }
+        }, 500);
       }
     });
 

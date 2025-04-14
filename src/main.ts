@@ -287,8 +287,12 @@ async function updateTrayMenu() {
   // If there's already an update in progress, wait for it to complete
   if (currentTrayUpdatePromise) {
     console.log('Tray update already in progress, waiting for it to complete...');
-    await currentTrayUpdatePromise;
-    return;
+    try {
+      await currentTrayUpdatePromise;
+    } catch (error) {
+      console.error('Error waiting for previous tray update:', error);
+      // Continue with the new update even if the previous one failed
+    }
   }
 
   // Create a new promise for this update
@@ -535,10 +539,29 @@ async function updateTrayMenu() {
           }
         },
         {
-          label: 'Manage Accounts',
-          click: addUser
-        },
-        {
+          label: Object.keys(tokens).length > 0 ? 'Manage Accounts' : 'Login',
+          click: () => {
+            // Pass a callback function to refresh the tray menu after account changes
+            addUser(() => {
+              console.log('Account changed, refreshing tray menu');
+              // Clear the user data cache to force a refresh
+              userStateCache = {};
+              // Update the tray menu with error handling
+              try {
+                updateTrayMenu().catch(error => {
+                  console.error('Error updating tray menu after account change:', error);
+                });
+              } catch (error) {
+                console.error('Error initiating tray menu update:', error);
+              }
+            });
+          }
+        }
+      );
+      
+      // Only add Refresh All if there are accounts
+      if (Object.keys(tokens).length > 0) {
+        contextMenuTemplate.push({
           label: 'Refresh All',
           click: async () => {
             // Clear the user data cache before refreshing
@@ -548,7 +571,10 @@ async function updateTrayMenu() {
             }
             updateTrayMenu();
           }
-        },
+        });
+      }
+      
+      contextMenuTemplate.push(
         { type: 'separator' },
         {
           label: 'Start at Login',
