@@ -588,6 +588,35 @@ async function updateTrayMenu() {
   return currentTrayUpdatePromise;
 }
 
+// Start polling when the app is ready
+app.whenReady().then(async () => {
+  console.log('App is ready, creating tray...');
+  
+  // Hide from dock and CMD+TAB switcher on macOS
+  if (process.platform === 'darwin') {
+    app.dock.hide();
+    app.setActivationPolicy('accessory');
+  }
+  
+  createTray();
+  
+  // Initialize the logger
+  initializeLogger();
+  
+  // Set up the steam profiles cache callback
+  setSteamProfilesCacheCallback((cache) => {
+    (global as any).steamProfilesCache = cache;
+  });
+  
+  // Start polling every minute
+  pollInterval = setInterval(() => {
+    updateTrayMenu();
+  }, POLL_INTERVAL_MS);
+  
+  // Initial update of the tray menu
+  await updateTrayMenu();
+});
+
 // Handle window-all-closed event
 app.on('window-all-closed', () => {
   console.log('All windows closed');
