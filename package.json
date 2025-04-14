@@ -5,7 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "tsc && electron .",
-    "build": "tsc && electron-builder",
+    "clean": "rimraf dist && rimraf release",
+    "build": "npm run clean && tsc && electron-builder",
     "watch": "tsc -w"
   },
   "author": "",
@@ -14,6 +15,7 @@
     "@types/node": "^20.11.24",
     "electron": "^29.1.0",
     "electron-builder": "^24.12.0",
+    "rimraf": "^5.0.5",
     "typescript": "^5.3.3"
   },
   "dependencies": {
