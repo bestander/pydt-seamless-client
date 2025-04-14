@@ -1,25 +1,64 @@
 {
-  "name": "pydt-mini-installer",
+  "name": "pydt-mini",
   "version": "1.1.0",
-  "description": "One-line installer for PYDT Mini desktop application",
-  "main": "install.js",
-  "bin": {
-    "pydt-mini-install": "./install.js"
-  },
-  "files": [
-    "install.js"
-  ],
+  "description": "Minimalist desktop application for PYDT integration",
+  "main": "dist/main.js",
   "scripts": {
-    "postinstall": "node install.js"
+    "dev": "tsc && electron .",
+    "build": "chmod +x build/build-icons.sh && ./build/build-icons.sh && tsc && electron-builder",
+    "watch": "tsc -w"
   },
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "axios": "^1.8.4",
-    "extract-zip": "^2.0.1",
-    "fs-extra": "^11.2.0"
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "electron": "^29.1.0",
+    "electron-builder": "^24.12.0",
+    "typescript": "^5.3.3"
   },
-  "publishConfig": {
-    "access": "public"
+  "dependencies": {
+    "@types/chokidar": "^1.7.5",
+    "axios": "^1.8.4",
+    "chokidar": "^4.0.3",
+    "electron-store": "^8.1.0"
+  },
+  "build": {
+    "appId": "com.pydt.mini",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": ["dmg", "zip"],
+      "icon": "assets/tray-icon.icns",
+      "identity": null,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "assets/**/*"
+    ],
+    "npmRebuild": false,
+    "removePackageScripts": true,
+    "removePackageKeywords": true,
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    }
   }
 }
