@@ -33,8 +33,23 @@ interface UserState {
 }
 
 function createTrayIcon(isMyTurn: boolean = false, isWatching: boolean = false) {
-  // Use the pre-rendered icon from assets
-  const iconPath = path.join(__dirname, '..', 'assets', 'tray-icon.png');
+  // Get the correct path for both development and production
+  let iconPath: string;
+  const basePath = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
+  
+  // Choose the appropriate icon based on state
+  let iconName: string;
+  if (isWatching) {
+    iconName = 'tray-icon-waiting.png';
+  } else if (isMyTurn) {
+    iconName = 'tray-icon-turn.png';
+  } else {
+    iconName = 'tray-icon.png';
+  }
+  
+  iconPath = path.join(basePath, 'assets', iconName);
+  console.log('Tray state:', isMyTurn, isWatching );
+  console.log('Loading tray icon from:', iconPath);
   
   // Create native image from file
   const icon = nativeImage.createFromPath(iconPath);
@@ -416,6 +431,7 @@ async function updateTrayMenu() {
           const userData = userDataMap[token];
           if (userData && game.currentPlayerSteamId === userData.steamId) {
             isMyTurn = true;
+            console.log('Found game that is my turn:', game.displayName);
             break;
           }
         }
@@ -424,8 +440,17 @@ async function updateTrayMenu() {
 
       // Update tray icon based on turn status
       const isWatching = watchedGame !== null;
+      console.log('=== TRAY ICON UPDATE ===');
+      console.log('Current state:', {
+        isMyTurn,
+        isWatching,
+        watchedGameId: watchedGame?.gameId,
+        allGamesCount: allGames.length
+      });
+      
       const icon = createTrayIcon(isMyTurn, isWatching);
       tray.setImage(icon);
+      console.log('Tray icon updated');
 
       // Create the games submenu
       const gamesSubmenu = allGames.length > 0 

@@ -46,10 +46,14 @@
     "extraResources": [
       {
         "from": "assets",
-        "to": "assets"
+        "to": "assets",
+        "filter": ["**/*"]
       }
     ],
     "asar": true,
+    "asarUnpack": [
+      "assets/**/*"
+    ],
     "npmRebuild": false,
     "removePackageScripts": true,
     "removePackageKeywords": true,
