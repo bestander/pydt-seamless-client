@@ -116,6 +116,9 @@ export async function addUser(): Promise<boolean> {
             // Set selected token
             store.set('selectedToken', userData.displayName);
             
+            // Refresh user data after adding
+            await refreshUserData(userData.displayName);
+            
             win.close();
             resolve(true);
           } else {
