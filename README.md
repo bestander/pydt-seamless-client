@@ -1,22 +1,22 @@
 # PYDT Super Client
 
-A desktop application for managing PYDT (Play Your Damn Turn) integration.
+A desktop application for managing PYDT (Play Your Damn Turn) integration with Civilization VI on Steam.
 
 ## Features
 
-- System tray application with easy access to commands
-- Token management
-- User selection
+- Support for multiple PYDT users
+- System tray application for easy access
+- Automatic turn detection for Civilization VI (Steam version)
 - Cross-platform support (macOS and Windows)
 
-## Development Setup
+## Setup
 
 1. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Start the development server:
+2. Start the application:
 ```bash
 npm run dev
 ```
@@ -25,15 +25,6 @@ npm run dev
 ```bash
 npm run build
 ```
-
-## Project Structure
-
-- `src/` - Source code
-  - `main/` - Main process code
-  - `renderer/` - Renderer process code
-  - `shared/` - Shared types and utilities
-- `assets/` - Application assets
-- `build/` - Build configuration
 
 ## License
 
