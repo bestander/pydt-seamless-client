@@ -265,6 +265,19 @@ function updatePollUrlCache(token: string, pollUrl: string | null) {
   }
 }
 
+// Add autostart functionality
+function setAutoStart(enabled: boolean) {
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    path: app.getPath('exe'),
+    args: []
+  });
+}
+
+function isAutoStartEnabled(): boolean {
+  return app.getLoginItemSettings().openAtLogin;
+}
+
 async function updateTrayMenu() {
   if (!tray) {
     console.error('Tray is null, cannot update menu');
@@ -516,6 +529,15 @@ async function updateTrayMenu() {
         },
         { type: 'separator' },
         {
+          label: 'Start at Login',
+          type: 'checkbox',
+          checked: isAutoStartEnabled(),
+          click: (menuItem) => {
+            setAutoStart(menuItem.checked);
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'Open Log',
           click: () => {
             openLogWindow();
@@ -555,6 +577,13 @@ async function updateTrayMenu() {
 // Start polling when the app is ready
 app.whenReady().then(async () => {
   console.log('App is ready, creating tray...');
+  
+  // Hide from dock and CMD+TAB switcher on macOS
+  if (process.platform === 'darwin') {
+    app.dock.hide();
+    app.setActivationPolicy('accessory');
+  }
+  
   createTray();
   
   // Initialize the logger

@@ -1,12 +1,11 @@
 {
   "name": "pydt-mini",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Minimalist desktop application for PYDT integration",
   "main": "dist/main.js",
   "scripts": {
-    "start": "electron .",
     "dev": "tsc && electron .",
-    "build": "tsc && electron-builder",
+    "build": "chmod +x build/build-icons.sh && ./build/build-icons.sh && tsc && electron-builder",
     "watch": "tsc -w"
   },
   "author": "",
@@ -27,13 +26,13 @@
     "appId": "com.pydt.mini",
     "mac": {
       "category": "public.app-category.utilities",
-      "target": ["dmg"],
-      "icon": "assets/icon.icns",
+      "target": ["dmg", "zip"],
+      "icon": "assets/tray-icon.icns",
       "identity": null,
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "gatekeeperAssess": false,
-      "entitlements": null,
-      "entitlementsInherit": null
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
       "target": "nsis"
