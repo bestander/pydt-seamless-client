@@ -465,8 +465,8 @@ async function updateTrayMenu() {
       tray.setImage(icon);
       console.log('Tray icon updated');
 
-      // Create the games submenu
-      const gamesSubmenu = allGames.length > 0 
+      // Create the games menu items
+      const gameMenuItems = allGames.length > 0 
         ? allGames.map(game => {
             const currentPlayer = playerProfiles[game.currentPlayerSteamId];
             const playerName = currentPlayer ? ` [${currentPlayer.personaname}]` : '';
@@ -500,12 +500,25 @@ async function updateTrayMenu() {
             enabled: false
           }];
 
-      const contextMenu = Menu.buildFromTemplate([
-        {
+      // Build the context menu template
+      const contextMenuTemplate: Electron.MenuItemConstructorOptions[] = [];
+      
+      // Add games directly to the menu if there are fewer than 3, otherwise use a submenu
+      if (allGames.length > 0 && allGames.length < 3) {
+        // Add games directly to the menu
+        contextMenuTemplate.push(...gameMenuItems);
+        contextMenuTemplate.push({ type: 'separator' });
+      } else if (allGames.length >= 3) {
+        // Use a submenu for 3 or more games
+        contextMenuTemplate.push({
           label: 'Games',
-          submenu: gamesSubmenu
-        },
-        { type: 'separator' },
+          submenu: gameMenuItems
+        });
+        contextMenuTemplate.push({ type: 'separator' });
+      }
+
+      // Add the rest of the menu items
+      contextMenuTemplate.push(
         {
           label: 'Open PYDT',
           click: () => {
@@ -532,7 +545,7 @@ async function updateTrayMenu() {
           label: 'Start at Login',
           type: 'checkbox',
           checked: isAutoStartEnabled(),
-          click: (menuItem) => {
+          click: (menuItem: Electron.MenuItem) => {
             setAutoStart(menuItem.checked);
           }
         },
@@ -550,8 +563,9 @@ async function updateTrayMenu() {
             app.quit();
           }
         }
-      ]);
+      );
 
+      const contextMenu = Menu.buildFromTemplate(contextMenuTemplate);
       tray.setContextMenu(contextMenu);
       console.log('Menu updated successfully');
     } catch (error: any) {
