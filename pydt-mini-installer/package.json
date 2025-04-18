@@ -1,6 +1,6 @@
 {
   "name": "pydt-mini-installer",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "One-line installer for PYDT Mini desktop application",
   "main": "install.js",
   "bin": {
