@@ -17,7 +17,8 @@ let watchedGame: {
   token: string,
   username: string,
   processedFiles: Set<string>,
-  gameId: string
+  gameId: string,
+  downloadedFilePath?: string
 } | null = null;
 let userStateCache: { [token: string]: UserState } = {};
 let steamProfilesCache: { [steamId: string]: SteamProfile } = {};
@@ -82,7 +83,6 @@ function createTray() {
 
 async function submitTurn(game: PYDTGame, username: string, token: string, filePath: string) {
   try {
-
     // Check if it's our turn using the cached user data
     if (game.currentPlayerSteamId !== userStateCache[token].steamId) {
       console.log(`Not my turn for game ${game.displayName}`);
@@ -96,9 +96,8 @@ async function submitTurn(game: PYDTGame, username: string, token: string, fileP
     console.log('Start turn submit response:', startResponse);
 
     // Read the file and compress it
-    const fileBuffer = fs.readFileSync(filePath);
+    const fileBuffer = await fs.promises.readFile(filePath);
     const compressedBuffer = zlib.gzipSync(fileBuffer);
-
 
     await fetch(startResponse.putUrl, {
       method: 'PUT',
@@ -114,6 +113,14 @@ async function submitTurn(game: PYDTGame, username: string, token: string, fileP
     console.log('Finish turn submit response:', finishResponse);
     updateTrayMenu();
     
+    // Delete the save file after successful submission
+    try {
+      await fs.promises.unlink(filePath);
+      console.log(`Deleted save file: ${filePath}`);
+    } catch (deleteError) {
+      console.error(`Error deleting save file ${filePath}:`, deleteError);
+    }
+    
     return true;
   } catch (error: any) {
     console.error('Error submitting turn:', error);
@@ -123,7 +130,7 @@ async function submitTurn(game: PYDTGame, username: string, token: string, fileP
   }
 }
 
-function startWatchingGame(game: PYDTGame, username: string, token: string) {
+function startWatchingGame(game: PYDTGame, username: string, token: string, downloadedFilePath?: string) {
   // Get the save directory
   const saveDir = getSaveDirectory();
 
@@ -165,7 +172,8 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
     token,
     username,
     processedFiles: existingFiles, // Initialize with existing files
-    gameId: game.gameId
+    gameId: game.gameId,
+    downloadedFilePath // Store the downloaded file path
   };
 
   console.log(`Started watching for new save files in ${saveDir}`);
@@ -187,6 +195,15 @@ function startWatchingGame(game: PYDTGame, username: string, token: string) {
           if (success) {
             // Stop watching after successful submission
             watcher.close();
+            // Delete the downloaded file if it exists and wasn't the one we just processed
+            if (watchedGame?.downloadedFilePath && watchedGame.downloadedFilePath !== filePath) {
+              try {
+                await fs.promises.unlink(watchedGame.downloadedFilePath);
+                console.log(`Deleted downloaded save file: ${watchedGame.downloadedFilePath}`);
+              } catch (deleteError) {
+                console.error(`Error deleting downloaded save file ${watchedGame.downloadedFilePath}:`, deleteError);
+              }
+            }
             watchedGame = null;
             // Update the tray menu to remove the hourglass
             updateTrayMenu();
@@ -214,7 +231,7 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
     
     // Create the directory if it doesn't exist
     if (!fs.existsSync(saveDir)) {
-      fs.mkdirSync(saveDir, { recursive: true });
+      await fs.promises.mkdir(saveDir, { recursive: true });
     }
     
     const filePath = path.join(saveDir, filename);
@@ -225,6 +242,7 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
       
       https.get(turnInfo.downloadUrl, (response) => {
         if (response.statusCode !== 200) {
+          fs.promises.unlink(filePath).catch(() => {}); // Delete the file if there was an error
           reject(new Error(`Failed to download turn: ${response.statusCode} ${response.statusMessage}`));
           return;
         }
@@ -235,16 +253,16 @@ async function downloadTurn(game: PYDTGame, username: string, token: string): Pr
         file.on('finish', () => {
           file.close();
           console.log(`Turn downloaded and decompressed successfully: ${filePath}`);
-          startWatchingGame(game, username, token);
+          startWatchingGame(game, username, token, filePath); // Pass the filePath to startWatchingGame
           resolve(true);
         });
       }).on('error', (err) => {
-        fs.unlink(filePath, () => {}); // Delete the file if there was an error
+        fs.promises.unlink(filePath).catch(() => {}); // Delete the file if there was an error
         reject(err);
       });
       
       file.on('error', (err) => {
-        fs.unlink(filePath, () => {}); // Delete the file if there was an error
+        fs.promises.unlink(filePath).catch(() => {}); // Delete the file if there was an error
         reject(err);
       });
     });
@@ -508,8 +526,20 @@ async function updateTrayMenu() {
                     }
                   }
                 } else {
-                  // If it's not our turn, open the game in browser
-                  shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
+                  // If it's not our turn, refresh once to check if it became our turn
+                  await updateTrayMenu();
+                  const updatedMyTurnInfo = myTurnGames[game.gameId];
+                  
+                  if (updatedMyTurnInfo) {
+                    // It became our turn, start watching
+                    const success = await downloadTurn(updatedMyTurnInfo.game, updatedMyTurnInfo.username, updatedMyTurnInfo.token);
+                    if (success) {
+                      updateTrayMenu();
+                    }
+                  } else {
+                    // Still not our turn, open in browser
+                    shell.openExternal(`https://playyourdamnturn.com/game/${game.gameId}`);
+                  }
                 }
               }
             };
@@ -523,12 +553,12 @@ async function updateTrayMenu() {
       const contextMenuTemplate: Electron.MenuItemConstructorOptions[] = [];
       
       // Add games directly to the menu if there are fewer than 3, otherwise use a submenu
-      if (allGames.length > 0 && allGames.length < 3) {
+      if (allGames.length > 0 && allGames.length < 5) {
         // Add games directly to the menu
         contextMenuTemplate.push(...gameMenuItems);
         contextMenuTemplate.push({ type: 'separator' });
-      } else if (allGames.length >= 3) {
-        // Use a submenu for 3 or more games
+      } else if (allGames.length >= 5) {
+        // Use a submenu for 5 or more games
         contextMenuTemplate.push({
           label: 'Games',
           submenu: gameMenuItems
