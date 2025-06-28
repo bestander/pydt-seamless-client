@@ -186,6 +186,7 @@ export class PYDTApi {
     const body: any = {};
     if (password) {
       body.password = password;
+      body.playerCiv = 'LEADER_RANDOM';
     }
     
     const response = await fetch(`${this.baseUrl}/game/${gameId}/join`, {
@@ -201,6 +202,28 @@ export class PYDTApi {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Failed to join game: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+  }
+
+  async leaveGame(token: string, gameId: string): Promise<void> {
+    this.logger.log(`Making request to ${this.baseUrl}/game/${gameId}/leave`);
+    
+    const body: any = {};
+    body.user = token;
+
+    const response = await fetch(`${this.baseUrl}/game/${gameId}/leave`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    
+    this.logger.log(`Response status for ${this.baseUrl}/game/${gameId}/leave: ${response.status} ${response.statusText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to leave game: ${response.status} ${response.statusText} - ${errorText}`);
     }
   }
 

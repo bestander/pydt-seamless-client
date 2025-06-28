@@ -24,7 +24,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
     return;
   }
 
-  const userGamesData: { [username: string]: {displayName: string}[] } = {};
+  const userGamesData: { [username: string]: {displayName: string, gameId: string}[] } = {};
 
   for (const username of Object.keys(tokens)) {
     try {
@@ -32,7 +32,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
       const { data: userGames } = await fetchUserGames(token);
       userGamesData[username] = userGames.map(game => {
         console.log('Rendering game:', game); // Debug log to verify game structure
-        return { displayName: game.displayName };
+        return { displayName: game.displayName, gameId: game.gameId };
       });
     } catch (error) {
       console.error(`Error fetching games for user ${username}:`, error);
@@ -65,7 +65,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
               return `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
                   <span>${game.displayName}</span>
-                  <button style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
+                  <button onclick="leaveGame('${game.gameId}', '${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
                 </div>
               `;
             }).join('')
@@ -140,6 +140,15 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
             });
           }
 
+          function leaveGame(gameId, username) {
+            if (confirm('Are you sure you want to leave this game?')) {
+              ipcRenderer.send('leave-game', {
+                gameId: gameId,
+                username: username
+              });
+            }
+          }
+
           ipcRenderer.on('update-games', (event, userGamesData) => {
             console.log('Received updated games data:', userGamesData); // Debug log
             const userSelector = document.getElementById('userSelector');
@@ -154,7 +163,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
                       return \`
                         <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
                           <span>\${game.displayName}</span>
-                          <button style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
+                          <button onclick="leaveGame('\${game.gameId}', '\${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
                         </div>
                       \`;
                     }).join('')
@@ -180,6 +189,16 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
               ipcRenderer.send('refresh-games');
             } else {
               alert('Failed to join game: ' + result.error);
+            }
+          });
+
+          ipcRenderer.on('leave-game-result', (event, result) => {
+            if (result.success) {
+              alert('Successfully left the game!');
+              // Request updated games data
+              ipcRenderer.send('refresh-games');
+            } else {
+              alert('Failed to leave game: ' + result.error);
             }
           });
 
@@ -229,7 +248,8 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
 
       // Extract game ID from URL if it's a full URL
       let gameId = gameUrl;
-      const urlMatch = gameUrl.match(/\/game\/([a-f0-9-]+)/i);
+      // Check for PYDT URL format: https://www.playyourdamnturn.com/game/[gameId]
+      const urlMatch = gameUrl.match(/\/game\/([a-f0-9-]+)$/i);
       if (urlMatch) {
         gameId = urlMatch[1];
       }
@@ -241,7 +261,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
       
       // Refresh games data
       const { data: updatedGames } = await fetchUserGames(token);
-      userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName }));
+      userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName, gameId: game.gameId }));
       win.webContents.send('update-games', userGamesData);
       
     } catch (error: any) {
@@ -253,12 +273,41 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
     }
   });
 
+  ipcMain.once('leave-game', async (_, data) => {
+    try {
+      const { gameId, username } = data;
+      const token = tokens[username];
+      
+      if (!token) {
+        win.webContents.send('leave-game-result', { success: false, error: 'User token not found' });
+        return;
+      }
+
+      // Leave the game using the API
+      await pydtApi.leaveGame(token, gameId);
+      
+      win.webContents.send('leave-game-result', { success: true });
+      
+      // Refresh games data
+      const { data: updatedGames } = await fetchUserGames(token);
+      userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName, gameId: game.gameId }));
+      win.webContents.send('update-games', userGamesData);
+      
+    } catch (error: any) {
+      console.error('Error leaving game:', error);
+      win.webContents.send('leave-game-result', { 
+        success: false, 
+        error: error.message || 'Unknown error occurred' 
+      });
+    }
+  });
+
   ipcMain.once('refresh-games', async () => {
     try {
       for (const username of Object.keys(tokens)) {
         const token = tokens[username];
         const { data: updatedGames } = await fetchUserGames(token);
-        userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName }));
+        userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName, gameId: game.gameId }));
       }
       win.webContents.send('update-games', userGamesData);
     } catch (error) {
