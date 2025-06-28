@@ -1,8 +1,8 @@
 import { BrowserWindow, ipcMain } from 'electron';
 import { getStore } from './account';
-import { pydtApi } from './api';
+import { pydtApi, PYDTGame } from './api';
 
-async function fetchUserGames(token: string) {
+async function fetchUserGames(token: string): Promise<{ data: PYDTGame[], pollUrl: string | null }> {
   try {
     const { data: userGames, pollUrl } = await pydtApi.getGames(token);
     console.log('Fetched user games:', userGames);
@@ -11,6 +11,29 @@ async function fetchUserGames(token: string) {
   } catch (error) {
     console.error('Error fetching user games:', error);
     return { data: [], pollUrl: null };
+  }
+}
+
+function mapGamesToUserData(games: PYDTGame[]): {displayName: string, gameId: string, inProgress: boolean}[] {
+  return games.map(game => ({
+    displayName: game.displayName,
+    gameId: game.gameId,
+    inProgress: game.inProgress || false
+  }));
+}
+
+async function refreshUserGamesData(tokens: any, userGamesData: { [username: string]: {displayName: string, gameId: string, inProgress: boolean}[] }, username?: string): Promise<void> {
+  const usersToRefresh = username ? [username] : Object.keys(tokens);
+  
+  for (const user of usersToRefresh) {
+    try {
+      const token = tokens[user];
+      const { data: updatedGames } = await fetchUserGames(token);
+      userGamesData[user] = mapGamesToUserData(updatedGames);
+    } catch (error) {
+      console.error(`Error refreshing games for user ${user}:`, error);
+      userGamesData[user] = [];
+    }
   }
 }
 
@@ -24,16 +47,13 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
     return;
   }
 
-  const userGamesData: { [username: string]: {displayName: string, gameId: string}[] } = {};
+  const userGamesData: { [username: string]: {displayName: string, gameId: string, inProgress: boolean}[] } = {};
 
   for (const username of Object.keys(tokens)) {
     try {
       const token = tokens[username];
       const { data: userGames } = await fetchUserGames(token);
-      userGamesData[username] = userGames.map(game => {
-        console.log('Rendering game:', game); // Debug log to verify game structure
-        return { displayName: game.displayName, gameId: game.gameId };
-      });
+      userGamesData[username] = mapGamesToUserData(userGames);
     } catch (error) {
       console.error(`Error fetching games for user ${username}:`, error);
       userGamesData[username] = [];
@@ -65,7 +85,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
               return `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
                   <span>${game.displayName}</span>
-                  <button onclick="leaveGame('${game.gameId}', '${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
+                  <button onclick="leaveGame('${game.gameId}', '${game.inProgress}', '${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
                 </div>
               `;
             }).join('')
@@ -104,9 +124,6 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
             <button onclick="joinGame()" style="background: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Join Game</button>
           </div>
         </div>
-        <div class="button-group" style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
-          <button onclick="closePopup()">Close</button>
-        </div>
         <script>
           const { ipcRenderer } = require('electron');
 
@@ -140,11 +157,12 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
             });
           }
 
-          function leaveGame(gameId, username) {
+          function leaveGame(gameId, inProgress, username) {
             if (confirm('Are you sure you want to leave this game?')) {
               ipcRenderer.send('leave-game', {
                 gameId: gameId,
-                username: username
+                username: username,
+                inProgress: inProgress
               });
             }
           }
@@ -163,7 +181,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
                       return \`
                         <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
                           <span>\${game.displayName}</span>
-                          <button onclick="leaveGame('\${game.gameId}', '\${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
+                          <button onclick="leaveGame('\${game.gameId}', '\${game.inProgress}', '\${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Leave</button>
                         </div>
                       \`;
                     }).join('')
@@ -211,9 +229,6 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
             }
           });
 
-          function closePopup() {
-            ipcRenderer.send('close-manage-games');
-          }
         </script>
       </body>
     </html>
@@ -235,6 +250,11 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
   win.webContents.once('did-finish-load', () => {
     win.webContents.send('update-games', userGamesData); // Send updated games data to the popup
   });
+
+  // Remove existing listeners to prevent multiple handlers
+  ipcMain.removeAllListeners('join-game');
+  ipcMain.removeAllListeners('leave-game');
+  ipcMain.removeAllListeners('refresh-games');
 
   ipcMain.once('join-game', async (_, data) => {
     try {
@@ -260,8 +280,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
       win.webContents.send('join-game-result', { success: true });
       
       // Refresh games data
-      const { data: updatedGames } = await fetchUserGames(token);
-      userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName, gameId: game.gameId }));
+      await refreshUserGamesData(tokens, userGamesData, username);
       win.webContents.send('update-games', userGamesData);
       
     } catch (error: any) {
@@ -276,6 +295,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
   ipcMain.once('leave-game', async (_, data) => {
     try {
       const { gameId, username } = data;
+      const inProgress: boolean = data.inProgress === true || data.inProgress === "true"; // Handle both boolean and string values
       const token = tokens[username];
       
       if (!token) {
@@ -284,13 +304,18 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
       }
 
       // Leave the game using the API
-      await pydtApi.leaveGame(token, gameId);
+      if (inProgress) {
+        // If the game is in progress, surrender instead of leaving
+        await pydtApi.surrenderGame(token, gameId);
+      } else {
+        // If the game is not in progress, leave normally
+        await pydtApi.leaveGame(token, gameId);
+      }
       
       win.webContents.send('leave-game-result', { success: true });
       
       // Refresh games data
-      const { data: updatedGames } = await fetchUserGames(token);
-      userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName, gameId: game.gameId }));
+      await refreshUserGamesData(tokens, userGamesData, username);
       win.webContents.send('update-games', userGamesData);
       
     } catch (error: any) {
@@ -304,20 +329,10 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
 
   ipcMain.once('refresh-games', async () => {
     try {
-      for (const username of Object.keys(tokens)) {
-        const token = tokens[username];
-        const { data: updatedGames } = await fetchUserGames(token);
-        userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName, gameId: game.gameId }));
-      }
+      await refreshUserGamesData(tokens, userGamesData);
       win.webContents.send('update-games', userGamesData);
     } catch (error) {
       console.error('Error refreshing games:', error);
-    }
-  });
-
-  ipcMain.once('close-manage-games', () => {
-    if (win && !win.isDestroyed()) {
-      win.close();
     }
   });
 
