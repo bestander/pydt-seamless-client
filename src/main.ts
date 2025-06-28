@@ -576,7 +576,7 @@ async function updateTrayMenu() {
           }
         },
         {
-          label: Object.keys(tokens).length > 0 ? 'Manage Accounts' : 'Login',
+          label: Object.keys(tokens).length > 0 ? 'Login/Logout' : 'Login',
           click: () => {
             // Pass a callback function to refresh the tray menu after account changes
             addUser(() => {

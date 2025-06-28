@@ -81,9 +81,13 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
         <title>Manage Games</title>
         <style>
           body { font-family: system-ui; padding: 20px; }
-          select, button { padding: 8px; margin: 10px 0; }
+          select, button, input { padding: 8px; margin: 5px 0; }
+          input { width: calc(100% - 16px); }
           .section { margin: 15px 0; }
           .section-title { font-weight: bold; margin-bottom: 10px; }
+          .join-section { border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px; }
+          .button-group { margin-top: 10px; }
+          .button-group button { margin-right: 8px; }
         </style>
       </head>
       <body>
@@ -92,7 +96,17 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
           <div class="section-title">Games</div>
           ${gamesList}
         </div>
-        <button onclick="closePopup()">Close</button>
+        <div class="section join-section">
+          <div class="section-title">Join Game</div>
+          <input type="text" id="gameUrl" placeholder="Game URL or Game ID" />
+          <input type="password" id="gamePassword" placeholder="Password (if required)" />
+          <div class="button-group">
+            <button onclick="joinGame()" style="background: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Join Game</button>
+          </div>
+        </div>
+        <div class="button-group" style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
+          <button onclick="closePopup()">Close</button>
+        </div>
         <script>
           const { ipcRenderer } = require('electron');
 
@@ -107,6 +121,24 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
               }
             }
           });
+
+          function joinGame() {
+            const userSelector = document.getElementById('userSelector');
+            const selectedUser = userSelector ? userSelector.value : Object.keys(${JSON.stringify(Object.keys(tokens))})[0];
+            const gameUrl = document.getElementById('gameUrl').value.trim();
+            const gamePassword = document.getElementById('gamePassword').value;
+
+            if (!gameUrl) {
+              alert('Please enter a game URL or Game ID');
+              return;
+            }
+
+            ipcRenderer.send('join-game', {
+              username: selectedUser,
+              gameUrl: gameUrl,
+              password: gamePassword
+            });
+          }
 
           ipcRenderer.on('update-games', (event, userGamesData) => {
             console.log('Received updated games data:', userGamesData); // Debug log
@@ -138,6 +170,19 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
             }
           });
 
+          ipcRenderer.on('join-game-result', (event, result) => {
+            if (result.success) {
+              alert('Successfully joined the game!');
+              // Clear the input fields
+              document.getElementById('gameUrl').value = '';
+              document.getElementById('gamePassword').value = '';
+              // Request updated games data
+              ipcRenderer.send('refresh-games');
+            } else {
+              alert('Failed to join game: ' + result.error);
+            }
+          });
+
           document.getElementById('userSelector')?.addEventListener('change', (event) => {
             const selectedUser = event.target.value;
             document.querySelectorAll('[id^="games-"]').forEach(el => el.style.display = 'none');
@@ -157,7 +202,7 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
 
   const win = new BrowserWindow({
     width: 400,
-    height: 400,
+    height: 500,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -170,6 +215,55 @@ export async function manageGames(onGamesChange?: () => void): Promise<void> {
 
   win.webContents.once('did-finish-load', () => {
     win.webContents.send('update-games', userGamesData); // Send updated games data to the popup
+  });
+
+  ipcMain.once('join-game', async (_, data) => {
+    try {
+      const { username, gameUrl, password } = data;
+      const token = tokens[username];
+      
+      if (!token) {
+        win.webContents.send('join-game-result', { success: false, error: 'User token not found' });
+        return;
+      }
+
+      // Extract game ID from URL if it's a full URL
+      let gameId = gameUrl;
+      const urlMatch = gameUrl.match(/\/game\/([a-f0-9-]+)/i);
+      if (urlMatch) {
+        gameId = urlMatch[1];
+      }
+
+      // Join the game using the API
+      await pydtApi.joinGame(token, gameId, password);
+      
+      win.webContents.send('join-game-result', { success: true });
+      
+      // Refresh games data
+      const { data: updatedGames } = await fetchUserGames(token);
+      userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName }));
+      win.webContents.send('update-games', userGamesData);
+      
+    } catch (error: any) {
+      console.error('Error joining game:', error);
+      win.webContents.send('join-game-result', { 
+        success: false, 
+        error: error.message || 'Unknown error occurred' 
+      });
+    }
+  });
+
+  ipcMain.once('refresh-games', async () => {
+    try {
+      for (const username of Object.keys(tokens)) {
+        const token = tokens[username];
+        const { data: updatedGames } = await fetchUserGames(token);
+        userGamesData[username] = updatedGames.map(game => ({ displayName: game.displayName }));
+      }
+      win.webContents.send('update-games', userGamesData);
+    } catch (error) {
+      console.error('Error refreshing games:', error);
+    }
   });
 
   ipcMain.once('close-manage-games', () => {
