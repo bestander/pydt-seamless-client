@@ -116,7 +116,8 @@ export class PYDTApi {
       this.logger.error('Invalid response format from /user/games');
       return {data: [], pollUrl: ''};
     }
-    return data;
+    const userGames = data.data; // Fetch userGames from the API response
+    return {data: userGames, pollUrl: data.pollUrl};
   }
 
   async getSteamProfiles(token: string, steamIds: string[]): Promise<SteamProfile[]> {
@@ -182,4 +183,4 @@ export class PYDTApi {
 
 }
 
-export const pydtApi = new PYDTApi(PYDT_API_BASE_URL, console); 
+export const pydtApi = new PYDTApi(PYDT_API_BASE_URL, console);

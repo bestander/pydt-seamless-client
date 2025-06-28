@@ -8,6 +8,7 @@ import * as zlib from 'zlib';
 import * as chokidar from 'chokidar';
 import { openLogWindow, initializeLogger, setSteamProfilesCacheCallback, updateSteamProfilesCache } from './logger';
 import { getSaveDirectory, POLL_INTERVAL_MS, STEAM_PROFILES_CACHE_DURATION } from './constants';
+import { manageGames } from './game-management';
 
 let tray: Tray | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
@@ -588,7 +589,19 @@ async function updateTrayMenu() {
           }
         }
       );
-      
+
+      if (Object.keys(tokens).length > 0) {
+        contextMenuTemplate.push({
+          label: 'Join/Leave',
+          click: () => {
+            manageGames(() => {
+              console.log('Games changed, refreshing tray menu');
+              updateTrayMenu();
+            });
+          }
+        });
+      }
+
       // Only add Refresh All if there are accounts
       if (Object.keys(tokens).length > 0) {
         contextMenuTemplate.push({
