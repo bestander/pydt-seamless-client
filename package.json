@@ -7,7 +7,8 @@
     "dev": "tsc && electron .",
     "clean": "rimraf dist && rimraf release",
     "build": "npm run clean && tsc && electron-builder",
-    "watch": "tsc -w"
+    "watch": "tsc -w",
+    "icons": "node -e \"const toIco = require('to-ico'); const fs = require('fs'); const path = require('path'); const assetsDir = 'assets'; fs.readdirSync(assetsDir).filter(file => path.extname(file) === '.png').forEach(async (pngFile) => { const pngPath = path.join(assetsDir, pngFile); const icoPath = path.join(assetsDir, path.basename(pngFile, '.png') + '.ico'); const buf = await toIco([fs.readFileSync(pngPath)]); fs.writeFileSync(icoPath, buf); console.log('Converted', pngFile, 'to', path.basename(icoPath)); });\""
   },
   "author": "",
   "license": "MIT",
@@ -16,6 +17,7 @@
     "electron": "^29.1.0",
     "electron-builder": "^24.12.0",
     "rimraf": "^5.0.5",
+    "to-ico": "^1.1.5",
     "typescript": "^5.3.3"
   },
   "dependencies": {
@@ -28,7 +30,10 @@
     "appId": "com.pydt.mini",
     "mac": {
       "category": "public.app-category.utilities",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "assets/tray-icon.icns",
       "identity": null,
       "hardenedRuntime": true,
@@ -37,7 +42,12 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/tray-icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/tray-icon.png"
     },
     "files": [
       "dist/**/*",
@@ -48,7 +58,9 @@
       {
         "from": "assets",
         "to": "assets",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asar": true,
