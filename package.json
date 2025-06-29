@@ -11,7 +11,7 @@
     "build:win": "npm run clean && tsc && electron-builder --win",
     "build:linux": "npm run clean && tsc && electron-builder --linux",
     "watch": "tsc -w",
-    "icons": "node -e \"const toIco = require('to-ico'); const fs = require('fs'); const path = require('path'); const assetsDir = 'assets'; fs.readdirSync(assetsDir).filter(file => path.extname(file) === '.png').forEach(async (pngFile) => { const pngPath = path.join(assetsDir, pngFile); const icoPath = path.join(assetsDir, path.basename(pngFile, '.png') + '.ico'); const buf = await toIco([fs.readFileSync(pngPath)]); fs.writeFileSync(icoPath, buf); console.log('Converted', pngFile, 'to', path.basename(icoPath)); });\""
+    "icons": "node -e \"const toIco = require('to-ico'); const sharp = require('sharp'); const fs = require('fs'); const path = require('path'); const assetsDir = 'assets'; fs.readdirSync(assetsDir).filter(file => path.extname(file) === '.png').forEach(async (pngFile) => { const pngPath = path.join(assetsDir, pngFile); const icoPath = path.join(assetsDir, path.basename(pngFile, '.png') + '.ico'); const resizedBuffer = await sharp(pngPath).resize(256, 256).png().toBuffer(); const buf = await toIco([resizedBuffer]); fs.writeFileSync(icoPath, buf); console.log('Converted', pngFile, 'to', path.basename(icoPath), 'at 256x256'); });\""
   },
   "author": "",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "electron": "^29.1.0",
     "electron-builder": "^24.12.0",
     "rimraf": "^5.0.5",
+    "sharp": "^0.33.2",
     "to-ico": "^1.1.5",
     "typescript": "^5.3.3"
   },
