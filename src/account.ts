@@ -1,16 +1,24 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
 import Store from 'electron-store';
 import { pydtApi, PYDTUser } from './api';
+import { validateCivaSession } from './civa-api';
+import { clearCivaSession, getCivaSessionToken } from './civa-account';
 
 interface AppState {
   tokens: { [name: string]: string };  // name -> token mapping
   userData: { [token: string]: PYDTUser };
+  /** When true, successful PYDT turn uploads also push the save to a linked Civa mirror. */
+  syncTurnsToCiva: boolean;
+  /** civa.us `session` cookie value for REST uploads. */
+  civaSessionToken: string | null;
 }
 
 const store = new Store<AppState>({
   defaults: {
     tokens: {},
-    userData: {}
+    userData: {},
+    syncTurnsToCiva: false,
+    civaSessionToken: null,
   }
 });
 
@@ -18,8 +26,35 @@ export function getStore(): Store<AppState> {
   return store;
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildCivaStatusHtml(connectedName: string | null, invalidSession: boolean): string {
+  if (connectedName) {
+    return `<div id="civa-status" style="color: #0a6b0a; margin-bottom: 8px;">Signed in to Civa as <strong>${escapeHtml(connectedName)}</strong></div>`;
+  }
+  if (invalidSession) {
+    return `<div id="civa-status" style="color: #a33; margin-bottom: 8px;">Saved Civa session is invalid — paste a new one below.</div>`;
+  }
+  return `<div id="civa-status" style="color: #666; margin-bottom: 8px;">Not signed in to Civa</div>`;
+}
+
+async function resolveCivaDisplayName(): Promise<{ name: string | null; invalidSession: boolean }> {
+  const token = getCivaSessionToken();
+  if (!token) return { name: null, invalidSession: false };
+  const player = await validateCivaSession(token);
+  return { name: player?.name ?? null, invalidSession: !player };
+}
+
 export async function addUser(onAccountChange?: () => void): Promise<boolean> {
   const tokens = store.get('tokens', {});
+  const civaStatus = await resolveCivaDisplayName();
+  const civaConnectedName = civaStatus.name;
   const userList = Object.keys(tokens).map(username => `
     <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
       <span>${username}</span>
@@ -30,11 +65,11 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
   const htmlContent = `
     <html>
       <head>
-        <title>Manage PYDT Accounts</title>
+        <title>Login / Accounts</title>
         <style>
           body { font-family: system-ui; padding: 20px; }
-          input { width: 100%; padding: 8px; margin: 10px 0; }
-          button { padding: 8px 16px; margin-right: 8px; }
+          input { width: 100%; padding: 8px; margin: 10px 0; box-sizing: border-box; }
+          button { padding: 8px 16px; margin-right: 8px; margin-top: 4px; }
           a { color: #0066cc; text-decoration: none; }
           a:hover { text-decoration: underline; }
           .section { margin: 15px 0; }
@@ -43,17 +78,27 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
       </head>
       <body>
         <div class="section">
-          <div class="section-title">Add New Account</div>
+          <div class="section-title">Add PYDT account</div>
           <input type="text" id="input" placeholder="Enter your PYDT authentication token" />
           <div style="margin: 10px 0;">
-            <small>To get your token, <a href="#" onclick="openProfile(); return false;">click here to open your profile page</a>.</small>
+            <small>To get your token, <a href="#" onclick="openProfile(); return false;">open your PYDT profile</a>.</small>
           </div>
           <button onclick="submit()">Add Account</button>
           <button onclick="cancel()">Close</button>
         </div>
-        <div class="section">
-          <div class="section-title">Saved Accounts</div>
-          ${userList || '<div style="color: #666;">No accounts saved yet</div>'}
+        <div class="section" id="saved-accounts-section">
+          <div class="section-title">Saved PYDT accounts</div>
+          <div id="saved-accounts-list">${userList || '<div style="color: #666;">No accounts saved yet</div>'}</div>
+        </div>
+        <div class="section" id="civa-section">
+          <div class="section-title">Civa (optional)</div>
+          ${buildCivaStatusHtml(civaConnectedName, civaStatus.invalidSession)}
+          <input type="text" id="civa-input" placeholder="Paste your civa.us session cookie" autocomplete="off" />
+          <div style="margin: 10px 0;">
+            <small>Sign in at <a href="#" onclick="openCiva(); return false;">civa.us</a>, then copy the <code>session</code> cookie (browser dev tools → Application → Cookies).</small>
+          </div>
+          <button onclick="saveCiva()">Save Civa session</button>
+          <button onclick="logoutCiva()" id="civa-logout-btn" style="${getCivaSessionToken() ? '' : 'display:none'}">Log out from Civa</button>
         </div>
         <script>
           function submit() {
@@ -64,6 +109,15 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
           }
           function openProfile() {
             require('electron').shell.openExternal('https://www.playyourdamnturn.com/user/profile');
+          }
+          function openCiva() {
+            require('electron').shell.openExternal('https://civa.us');
+          }
+          function saveCiva() {
+            require('electron').ipcRenderer.send('save-civa-token', document.getElementById('civa-input').value);
+          }
+          function logoutCiva() {
+            require('electron').ipcRenderer.send('clear-civa-token');
           }
           function removeUser(username) {
             if (confirm('Are you sure you want to remove this account?')) {
@@ -76,8 +130,8 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
   `;
 
   const win = new BrowserWindow({
-    width: 400,
-    height: 400,
+    width: 440,
+    height: 520,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -190,6 +244,69 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
       }
     });
 
+    const refreshSavedAccountsList = (tokenMap: { [name: string]: string }) => {
+      if (!win || win.isDestroyed()) return;
+      const accountsList = Object.keys(tokenMap).map(username => `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
+            <span>${username}</span>
+            <button onclick="removeUser('${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">×</button>
+          </div>
+        `).join('') || '<div style="color: #666;">No accounts saved yet</div>';
+
+      win.webContents.executeJavaScript(`
+          const list = document.getElementById('saved-accounts-list');
+          if (list) list.innerHTML = \`${accountsList}\`;
+        `).catch(err => {
+          console.error('Error updating accounts list:', err);
+        });
+    };
+
+    const refreshCivaSection = (connectedName: string | null, hasToken: boolean) => {
+      if (!win || win.isDestroyed()) return;
+      const statusHtml = buildCivaStatusHtml(connectedName, hasToken && !connectedName);
+      win.webContents.executeJavaScript(`
+          const status = document.getElementById('civa-status');
+          if (status) status.outerHTML = \`${statusHtml}\`;
+          const logoutBtn = document.getElementById('civa-logout-btn');
+          if (logoutBtn) logoutBtn.style.display = ${hasToken ? "'inline-block'" : "'none'"};
+          const input = document.getElementById('civa-input');
+          if (input && ${connectedName ? 'true' : 'false'}) input.value = '';
+        `).catch(err => {
+          console.error('Error updating Civa section:', err);
+        });
+    };
+
+    const saveCivaHandler = async (_: Electron.IpcMainEvent, value: string) => {
+      const trimmed = value?.trim();
+      if (!trimmed) {
+        return;
+      }
+      const player = await validateCivaSession(trimmed);
+      if (!player) {
+        if (win && !win.isDestroyed()) {
+          win.webContents.executeJavaScript(`alert('Invalid Civa session. Sign in at civa.us and copy the session cookie again.');`);
+        }
+        return;
+      }
+      store.set('civaSessionToken', trimmed);
+      console.log(`Civa session saved for ${player.name}`);
+      refreshCivaSection(player.name, true);
+      if (onAccountChange) {
+        onAccountChange();
+      }
+    };
+
+    const clearCivaHandler = () => {
+      clearCivaSession();
+      refreshCivaSection(null, false);
+      if (onAccountChange) {
+        onAccountChange();
+      }
+    };
+
+    ipcMain.on('save-civa-token', saveCivaHandler);
+    ipcMain.on('clear-civa-token', clearCivaHandler);
+
     ipcMain.once('remove-user', (_, username) => {
       const tokens = store.get('tokens', {});
       delete tokens[username];
@@ -206,29 +323,8 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
       
       // Check if window exists and is not destroyed before updating
       if (win && !win.isDestroyed()) {
-        const accountsList = Object.keys(tokens).map(username => `
-          <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 5px; background: #f5f5f5; border-radius: 4px;">
-            <span>${username}</span>
-            <button onclick="removeUser('${username}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">×</button>
-          </div>
-        `).join('') || '<div style="color: #666;">No accounts saved yet</div>';
+        refreshSavedAccountsList(tokens);
 
-        win.webContents.executeJavaScript(`
-          const savedAccountsSection = document.querySelector('.section:nth-child(2)');
-          if (savedAccountsSection) {
-            const content = savedAccountsSection.querySelector('div:not(.section-title)');
-            if (content) {
-              content.innerHTML = \`${accountsList}\`;
-            }
-          }
-        `).catch(err => {
-          console.error('Error updating window:', err);
-          // If the update fails, reload the window as a fallback
-          if (win && !win.isDestroyed()) {
-            win.reload();
-          }
-        });
-        
         // Close the window after a short delay to allow the UI to update
         setTimeout(() => {
           if (win && !win.isDestroyed()) {
@@ -239,6 +335,8 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
     });
 
     win.on('closed', () => {
+      ipcMain.removeListener('save-civa-token', saveCivaHandler);
+      ipcMain.removeListener('clear-civa-token', clearCivaHandler);
       resolve(false);
     });
   });

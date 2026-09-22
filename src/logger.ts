@@ -6,6 +6,21 @@ import * as os from 'os';
 // Log window and messages storage
 let logWindow: BrowserWindow | null = null;
 let logMessages: { message: string; type: string }[] = [];
+const MAX_LOG_MESSAGES = 100;
+
+function appendLogMessage(message: string, type: string): void {
+  logMessages.push({ message, type });
+  if (logMessages.length > MAX_LOG_MESSAGES) {
+    logMessages = logMessages.slice(-MAX_LOG_MESSAGES);
+  }
+}
+
+function pushLogToWindow(message: string, type: string): void {
+  if (!logWindow) return;
+  logWindow.webContents.executeJavaScript(
+    `window.addLogEntry(${JSON.stringify(message)}, ${JSON.stringify(type)})`,
+  );
+}
 
 // Store original console methods
 const originalConsoleLog = console.log;
@@ -215,6 +230,9 @@ export function openLogWindow() {
           entry.appendChild(timestampSpan);
           entry.appendChild(messageSpan);
           logContainer.appendChild(entry);
+          while (logContainer.children.length > ${MAX_LOG_MESSAGES}) {
+            logContainer.removeChild(logContainer.firstChild);
+          }
           
           // Auto-scroll to bottom
           logContainer.scrollTop = logContainer.scrollHeight;
@@ -269,7 +287,9 @@ export function openLogWindow() {
 
   // Wait for the window to be ready before sending logs
   logWindow.webContents.on('did-finish-load', () => {
-    // Send all existing logs to the window
+    if (logMessages.length > MAX_LOG_MESSAGES) {
+      logMessages = logMessages.slice(-MAX_LOG_MESSAGES);
+    }
     logWindow?.webContents.executeJavaScript(`window.loadInitialLogs(${JSON.stringify(logMessages)})`);
   });
 }
@@ -389,12 +409,9 @@ export function initializeLogger() {
       typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
     ).join(' ');
     
-    logMessages.push({ message, type: 'info' });
+    appendLogMessage(message, 'info');
     originalConsoleLog.apply(console, args);
-    
-    if (logWindow) {
-      logWindow.webContents.executeJavaScript(`window.addLogEntry(${JSON.stringify(message)}, 'info')`);
-    }
+    pushLogToWindow(message, 'info');
   };
 
   // Override console.error
@@ -407,12 +424,9 @@ export function initializeLogger() {
       typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
     ).join(' ');
     
-    logMessages.push({ message, type: 'error' });
+    appendLogMessage(message, 'error');
     originalConsoleError.apply(console, args);
-    
-    if (logWindow) {
-      logWindow.webContents.executeJavaScript(`window.addLogEntry(${JSON.stringify(message)}, 'error')`);
-    }
+    pushLogToWindow(message, 'error');
   };
 
   // Override console.warn
@@ -425,12 +439,9 @@ export function initializeLogger() {
       typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
     ).join(' ');
     
-    logMessages.push({ message, type: 'warn' });
+    appendLogMessage(message, 'warn');
     originalConsoleWarn.apply(console, args);
-    
-    if (logWindow) {
-      logWindow.webContents.executeJavaScript(`window.addLogEntry(${JSON.stringify(message)}, 'warn')`);
-    }
+    pushLogToWindow(message, 'warn');
   };
 
   // Override console.info
@@ -443,11 +454,8 @@ export function initializeLogger() {
       typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
     ).join(' ');
     
-    logMessages.push({ message, type: 'info' });
+    appendLogMessage(message, 'info');
     originalConsoleInfo.apply(console, args);
-    
-    if (logWindow) {
-      logWindow.webContents.executeJavaScript(`window.addLogEntry(${JSON.stringify(message)}, 'info')`);
-    }
+    pushLogToWindow(message, 'info');
   };
 } 

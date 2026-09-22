@@ -9,6 +9,8 @@ import * as chokidar from 'chokidar';
 import { openLogWindow, initializeLogger, setSteamProfilesCacheCallback, updateSteamProfilesCache } from './logger';
 import { getSaveDirectory, POLL_INTERVAL_MS, STEAM_PROFILES_CACHE_DURATION } from './constants';
 import { manageGames } from './game-management';
+import { getCivaSessionToken } from './civa-account';
+import { lookupCivaMirror, uploadCivaTurnFromPydt } from './civa-api';
 
 let tray: Tray | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
@@ -82,6 +84,32 @@ function createTray() {
   }
 }
 
+async function maybeUploadTurnToCiva(game: PYDTGame, fileBuffer: Buffer, filePath: string): Promise<void> {
+  const store = getStore();
+  if (!store.get('syncTurnsToCiva')) {
+    return;
+  }
+  const sessionToken = getCivaSessionToken();
+  if (!sessionToken) {
+    console.warn('Sync turns to Civa is enabled but no Civa session is saved');
+    return;
+  }
+
+  const lookup = await lookupCivaMirror(sessionToken, game.gameId);
+  if (!lookup?.mirrored) {
+    console.log(`No Civa mirror linked to PYDT game ${game.gameId}`);
+    return;
+  }
+
+  const fileName = path.basename(filePath);
+  const upload = await uploadCivaTurnFromPydt(sessionToken, game.gameId, fileBuffer, fileName);
+  if (!upload.ok) {
+    console.error(`Civa turn upload failed (${upload.status}): ${upload.message}`);
+    return;
+  }
+  console.log(`Uploaded turn to Civa mirror ${upload.gameId} at turn ${upload.turn}`);
+}
+
 async function submitTurn(game: PYDTGame, username: string, token: string, filePath: string) {
   try {
     // Check if it's our turn using the cached user data
@@ -112,6 +140,8 @@ async function submitTurn(game: PYDTGame, username: string, token: string, fileP
     // Finish the turn submission
     const finishResponse = await pydtApi.finishTurnSubmit(token, game.gameId);
     console.log('Finish turn submit response:', finishResponse);
+
+    await maybeUploadTurnToCiva(game, fileBuffer, filePath);
     updateTrayMenu();
     
     // Delete the save file after successful submission
@@ -576,7 +606,7 @@ async function updateTrayMenu() {
           }
         },
         {
-          label: Object.keys(tokens).length > 0 ? 'Login/Logout' : 'Login',
+          label: Object.keys(tokens).length > 0 ? 'Login / Accounts' : 'Login',
           click: () => {
             // Pass a callback function to refresh the tray menu after account changes
             addUser(() => {
@@ -617,6 +647,20 @@ async function updateTrayMenu() {
         });
       }
       
+      if (getCivaSessionToken()) {
+        contextMenuTemplate.push(
+          { type: 'separator' },
+          {
+            label: 'Sync turns to Civa',
+            type: 'checkbox',
+            checked: getStore().get('syncTurnsToCiva', false),
+            click: (menuItem: Electron.MenuItem) => {
+              getStore().set('syncTurnsToCiva', menuItem.checked);
+            }
+          },
+        );
+      }
+
       contextMenuTemplate.push(
         { type: 'separator' },
         {
