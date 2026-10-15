@@ -43,7 +43,7 @@ export async function lookupCivaMirror(
 ): Promise<CivaPydtMirrorLookup | null> {
   const response = await civaFetch(
     sessionToken,
-    `/civ6-import/mirror?pydtGameId=${encodeURIComponent(pydtGameId)}`,
+    `/save-import/mirror?pydtGameId=${encodeURIComponent(pydtGameId)}`,
   );
   if (!response.ok) {
     return null;
@@ -57,7 +57,7 @@ export async function uploadCivaTurnFromPydt(
   saveBuffer: Buffer,
   fileName: string,
 ): Promise<{ ok: true; turn: number; gameId: string } | { ok: false; status: number; message: string }> {
-  const response = await civaFetch(sessionToken, '/civ6-import/turn', {
+  const response = await civaFetch(sessionToken, '/save-import/turn', {
     method: 'POST',
     body: JSON.stringify({
       pydtGameId,
