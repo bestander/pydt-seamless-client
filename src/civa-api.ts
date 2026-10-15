@@ -40,13 +40,13 @@ export async function validateCivaSession(sessionToken: string): Promise<CivaPla
 export async function lookupCivaMirror(
   sessionToken: string,
   pydtGameId: string,
-): Promise<CivaPydtMirrorLookup | null> {
+): Promise<CivaPydtMirrorLookup> {
   const response = await civaFetch(
     sessionToken,
     `/save-import/mirror?pydtGameId=${encodeURIComponent(pydtGameId)}`,
   );
   if (!response.ok) {
-    return null;
+    throw new Error(`Civa mirror lookup failed (${response.status} ${response.statusText})`);
   }
   return (await response.json()) as CivaPydtMirrorLookup;
 }

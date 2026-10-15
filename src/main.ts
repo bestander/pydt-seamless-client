@@ -13,6 +13,8 @@ import { getCivaSessionToken } from './civa-account';
 import { lookupCivaMirror, uploadCivaTurnFromPydt } from './civa-api';
 
 let tray: Tray | null = null;
+// Set when the last Civa turn sync failed; shown as a red "!" on the tray icon until it succeeds or is dismissed.
+let civaSyncError: string | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
 let watchedGame: {
   watcher: chokidar.FSWatcher,
@@ -59,7 +61,38 @@ function createTrayIcon(isMyTurn: boolean = false, isWatching: boolean = false) 
   const icon = nativeImage.createFromPath(iconPath);
   
   // Resize the icon to the correct size
-  return icon.resize({ width: 16, height: 16 });
+  const resized = icon.resize({ width: 16, height: 16 });
+  return civaSyncError ? withErrorBadge(resized) : resized;
+}
+
+/** Draws a red disc with a white "!" in the bottom-right corner of a 16x16 tray icon. */
+function withErrorBadge(icon: Electron.NativeImage): Electron.NativeImage {
+  const size = 16;
+  const bitmap = Buffer.from(icon.toBitmap()); // BGRA
+  const set = (x: number, y: number, r: number, g: number, b: number) => {
+    const i = (y * size + x) * 4;
+    bitmap[i] = b;
+    bitmap[i + 1] = g;
+    bitmap[i + 2] = r;
+    bitmap[i + 3] = 255;
+  };
+  const cx = 10.5, cy = 10.5, radius = 5.5;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2) set(x, y, 220, 38, 38);
+    }
+  }
+  for (const y of [7, 8, 9, 10, 13]) {
+    set(10, y, 255, 255, 255);
+    set(11, y, 255, 255, 255);
+  }
+  return nativeImage.createFromBitmap(bitmap, { width: size, height: size });
+}
+
+function reportCivaSyncError(message: string): void {
+  console.error(`Civa sync error: ${message}`);
+  civaSyncError = message;
+  new Notification({ title: 'Civa turn sync failed', body: message }).show();
 }
 
 function createTray() {
@@ -91,23 +124,28 @@ async function maybeUploadTurnToCiva(game: PYDTGame, fileBuffer: Buffer, filePat
   }
   const sessionToken = getCivaSessionToken();
   if (!sessionToken) {
-    console.warn('Sync turns to Civa is enabled but no Civa session is saved');
+    reportCivaSyncError('Sync is enabled but you are not signed in to Civa. Sign in again from the menu.');
     return;
   }
 
-  const lookup = await lookupCivaMirror(sessionToken, game.gameId);
-  if (!lookup?.mirrored) {
-    console.log(`No Civa mirror linked to PYDT game ${game.gameId}`);
-    return;
-  }
+  try {
+    const lookup = await lookupCivaMirror(sessionToken, game.gameId);
+    if (!lookup?.mirrored) {
+      console.log(`No Civa mirror linked to PYDT game ${game.gameId}`);
+      return;
+    }
 
-  const fileName = path.basename(filePath);
-  const upload = await uploadCivaTurnFromPydt(sessionToken, game.gameId, fileBuffer, fileName);
-  if (!upload.ok) {
-    console.error(`Civa turn upload failed (${upload.status}): ${upload.message}`);
-    return;
+    const fileName = path.basename(filePath);
+    const upload = await uploadCivaTurnFromPydt(sessionToken, game.gameId, fileBuffer, fileName);
+    if (!upload.ok) {
+      reportCivaSyncError(`${game.displayName}: upload failed (${upload.status}) ${upload.message}`);
+      return;
+    }
+    console.log(`Uploaded turn to Civa mirror ${upload.gameId} at turn ${upload.turn}`);
+    civaSyncError = null;
+  } catch (error) {
+    reportCivaSyncError(`${game.displayName}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  console.log(`Uploaded turn to Civa mirror ${upload.gameId} at turn ${upload.turn}`);
 }
 
 async function submitTurn(game: PYDTGame, username: string, token: string, filePath: string) {
@@ -582,6 +620,19 @@ async function updateTrayMenu() {
 
       // Build the context menu template
       const contextMenuTemplate: Electron.MenuItemConstructorOptions[] = [];
+      if (civaSyncError) {
+        contextMenuTemplate.push(
+          { label: `⚠ Civa sync failed: ${civaSyncError}`, enabled: false },
+          {
+            label: 'Dismiss Civa error',
+            click: () => {
+              civaSyncError = null;
+              updateTrayMenu();
+            }
+          },
+          { type: 'separator' }
+        );
+      }
       
       // Add games directly to the menu if there are fewer than 3, otherwise use a submenu
       if (allGames.length > 0 && allGames.length < 5) {
