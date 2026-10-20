@@ -9,12 +9,16 @@ import * as chokidar from 'chokidar';
 import { openLogWindow, initializeLogger, setSteamProfilesCacheCallback, updateSteamProfilesCache } from './logger';
 import { getSaveDirectory, POLL_INTERVAL_MS, STEAM_PROFILES_CACHE_DURATION } from './constants';
 import { manageGames } from './game-management';
-import { getCivaSessionToken } from './civa-account';
-import { lookupCivaMirror, uploadCivaTurnFromPydt } from './civa-api';
+import { getCivaApiToken } from './civa-account';
+import { CivaAuthError } from './civa-api';
+import { describeProblem, syncTurnToCiva } from './civa-sync';
+import { createInCiva } from './create-game';
 
 let tray: Tray | null = null;
 // Set when the last Civa turn sync failed; shown as a red "!" on the tray icon until it succeeds or is dismissed.
 let civaSyncError: string | null = null;
+// True when civa answered 401: the stored API token was revoked or has expired.
+let civaTokenRejected = false;
 let pollInterval: NodeJS.Timeout | null = null;
 let watchedGame: {
   watcher: chokidar.FSWatcher,
@@ -117,34 +121,38 @@ function createTray() {
   }
 }
 
+/** A 401 from civa: remember it, so the menu says the token needs replacing, and show the red badge. */
+function reportCivaTokenRejected(): void {
+  civaTokenRejected = true;
+  reportCivaSyncError('Your Civa API token was revoked or has expired. Open Login / Accounts and paste a new one.');
+}
+
 async function maybeUploadTurnToCiva(game: PYDTGame, fileBuffer: Buffer, filePath: string): Promise<void> {
   const store = getStore();
   if (!store.get('syncTurnsToCiva')) {
     return;
   }
-  const sessionToken = getCivaSessionToken();
-  if (!sessionToken) {
-    reportCivaSyncError('Sync is enabled but you are not signed in to Civa. Sign in again from the menu.');
+  const apiToken = getCivaApiToken();
+  if (!apiToken) {
+    reportCivaSyncError('Sync is enabled but no Civa API token is saved. Paste one in Login / Accounts.');
     return;
   }
 
   try {
-    const lookup = await lookupCivaMirror(sessionToken, game.gameId);
-    if (!lookup?.mirrored) {
+    const outcome = await syncTurnToCiva(apiToken, game.gameId, fileBuffer, game.displayName);
+    if (outcome.kind === 'not-mirrored') {
       console.log(`No Civa mirror linked to PYDT game ${game.gameId}`);
       return;
     }
-
-    const fileName = path.basename(filePath);
-    const upload = await uploadCivaTurnFromPydt(sessionToken, game.gameId, fileBuffer, fileName);
-    if (!upload.ok) {
-      reportCivaSyncError(`${game.displayName}: upload failed (${upload.status}) ${upload.message}`);
+    console.log(`Uploaded turn to Civa mirror ${outcome.gameId} at turn ${outcome.turn} (${path.basename(filePath)})`);
+    civaSyncError = null;
+    civaTokenRejected = false;
+  } catch (error) {
+    if (error instanceof CivaAuthError) {
+      reportCivaTokenRejected();
       return;
     }
-    console.log(`Uploaded turn to Civa mirror ${upload.gameId} at turn ${upload.turn}`);
-    civaSyncError = null;
-  } catch (error) {
-    reportCivaSyncError(`${game.displayName}: ${error instanceof Error ? error.message : String(error)}`);
+    reportCivaSyncError(`${game.displayName}: ${describeProblem(error)}`);
   }
 }
 
@@ -393,6 +401,8 @@ async function updateTrayMenu() {
       const tokens = getStore().get('tokens') as { [key: string]: string };
       console.log(`Tokens: ${JSON.stringify(tokens)}`);
       const allGames: PYDTGame[] = [];
+      // Which saved PYDT account (its token) lists each game, for downloading a game's save.
+      const tokenOfGame: Record<string, string> = {};
       const myTurnGames: { [gameId: string]: { game: PYDTGame, username: string, token: string } } = {};
       let playerProfiles: { [steamId: string]: SteamProfile } = {};
 
@@ -475,6 +485,7 @@ async function updateTrayMenu() {
           for (const game of games) {
             if (!allGames.some(g => g.gameId === game.gameId)) {
               allGames.push(game);
+              tokenOfGame[game.gameId] = token;
             }
             
             // Check if this is our turn using the cached user data
@@ -622,11 +633,15 @@ async function updateTrayMenu() {
       const contextMenuTemplate: Electron.MenuItemConstructorOptions[] = [];
       if (civaSyncError) {
         contextMenuTemplate.push(
-          { label: `⚠ Civa sync failed: ${civaSyncError}`, enabled: false },
+          { label: `⚠ Civa sync failed: ${civaSyncError.split('\n')[0]}`, enabled: false },
+          ...(civaTokenRejected
+            ? [{ label: 'Civa token revoked or expired — paste a new one…', click: () => { addUser(() => { civaTokenRejected = false; civaSyncError = null; updateTrayMenu(); }); } }]
+            : []),
           {
             label: 'Dismiss Civa error',
             click: () => {
               civaSyncError = null;
+              civaTokenRejected = false;
               updateTrayMenu();
             }
           },
@@ -698,7 +713,7 @@ async function updateTrayMenu() {
         });
       }
       
-      if (getCivaSessionToken()) {
+      if (getCivaApiToken()) {
         contextMenuTemplate.push(
           { type: 'separator' },
           {
@@ -710,6 +725,17 @@ async function updateTrayMenu() {
             }
           },
         );
+        if (allGames.length > 0) {
+          contextMenuTemplate.push({
+            label: 'Create game in Civa',
+            submenu: allGames.map(game => ({
+              label: game.displayName,
+              click: () => {
+                void createInCiva(game, tokenOfGame[game.gameId] ?? Object.values(tokens)[0]!, reportCivaTokenRejected);
+              }
+            }))
+          });
+        }
       }
 
       contextMenuTemplate.push(

@@ -1,16 +1,17 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
 import Store from 'electron-store';
 import { pydtApi, PYDTUser } from './api';
-import { validateCivaSession } from './civa-api';
-import { clearCivaSession, getCivaSessionToken } from './civa-account';
+import { CivaAuthError, whoami } from './civa-api';
+import { CIVA_ACCOUNT_URL } from './constants';
+import { clearCivaToken, dropLegacyCivaSession, getCivaApiToken, setCivaApiToken } from './civa-account';
 
 interface AppState {
   tokens: { [name: string]: string };  // name -> token mapping
   userData: { [token: string]: PYDTUser };
   /** When true, successful PYDT turn uploads also push the save to a linked Civa mirror. */
   syncTurnsToCiva: boolean;
-  /** civa.us `session` cookie value for REST uploads. */
-  civaSessionToken: string | null;
+  /** civa user API token (`civa_user_…`), pasted once from civa's account page. Sent only as a Bearer header. */
+  civaApiToken: string | null;
 }
 
 const store = new Store<AppState>({
@@ -18,9 +19,12 @@ const store = new Store<AppState>({
     tokens: {},
     userData: {},
     syncTurnsToCiva: false,
-    civaSessionToken: null,
+    civaApiToken: null,
   }
 });
+
+// The pre-1.5 session-cookie login is gone; forget it.
+dropLegacyCivaSession();
 
 export function getStore(): Store<AppState> {
   return store;
@@ -34,21 +38,27 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function buildCivaStatusHtml(connectedName: string | null, invalidSession: boolean): string {
+function buildCivaStatusHtml(connectedName: string | null, tokenProblem: string | null): string {
   if (connectedName) {
-    return `<div id="civa-status" style="color: #0a6b0a; margin-bottom: 8px;">Signed in to Civa as <strong>${escapeHtml(connectedName)}</strong></div>`;
+    return `<div id="civa-status" style="color: #0a6b0a; margin-bottom: 8px;">Connected to Civa as <strong>${escapeHtml(connectedName)}</strong></div>`;
   }
-  if (invalidSession) {
-    return `<div id="civa-status" style="color: #a33; margin-bottom: 8px;">Saved Civa session is invalid — paste a new one below.</div>`;
+  if (tokenProblem) {
+    return `<div id="civa-status" style="color: #a33; margin-bottom: 8px;">${escapeHtml(tokenProblem)}</div>`;
   }
-  return `<div id="civa-status" style="color: #666; margin-bottom: 8px;">Not signed in to Civa</div>`;
+  return `<div id="civa-status" style="color: #666; margin-bottom: 8px;">Not connected to Civa</div>`;
 }
 
-async function resolveCivaDisplayName(): Promise<{ name: string | null; invalidSession: boolean }> {
-  const token = getCivaSessionToken();
-  if (!token) return { name: null, invalidSession: false };
-  const player = await validateCivaSession(token);
-  return { name: player?.name ?? null, invalidSession: !player };
+const TOKEN_REVOKED_TEXT = 'Your Civa API token was revoked or has expired. Paste a new one below.';
+
+/** The account behind the stored token. A 401 is "revoked or expired"; any other failure is reported as it is. */
+async function resolveCivaDisplayName(): Promise<{ name: string | null; tokenProblem: string | null }> {
+  const token = getCivaApiToken();
+  if (!token) return { name: null, tokenProblem: null };
+  try {
+    return { name: (await whoami(token)).name, tokenProblem: null };
+  } catch (error) {
+    return { name: null, tokenProblem: error instanceof CivaAuthError ? TOKEN_REVOKED_TEXT : `Could not reach Civa: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 export async function addUser(onAccountChange?: () => void): Promise<boolean> {
@@ -92,13 +102,13 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
         </div>
         <div class="section" id="civa-section">
           <div class="section-title">Civa (optional)</div>
-          ${buildCivaStatusHtml(civaConnectedName, civaStatus.invalidSession)}
-          <input type="text" id="civa-input" placeholder="Paste your civa.us session cookie" autocomplete="off" />
+          ${buildCivaStatusHtml(civaConnectedName, civaStatus.tokenProblem)}
+          <input type="password" id="civa-input" placeholder="Paste your Civa API token (civa_user_…)" autocomplete="off" />
           <div style="margin: 10px 0;">
-            <small>Sign in at <a href="#" onclick="openCiva(); return false;">civa.us</a>, then copy the <code>session</code> cookie (browser dev tools → Application → Cookies).</small>
+            <small>Sign in at <a href="#" onclick="openCiva(); return false;">Civa</a>, open <b>Your account</b> → <b>API tokens</b>, create a token and paste it here once. It is stored on this computer and only sent to Civa.</small>
           </div>
-          <button onclick="saveCiva()">Save Civa session</button>
-          <button onclick="logoutCiva()" id="civa-logout-btn" style="${getCivaSessionToken() ? '' : 'display:none'}">Log out from Civa</button>
+          <button onclick="saveCiva()">Save Civa token</button>
+          <button onclick="logoutCiva()" id="civa-logout-btn" style="${getCivaApiToken() ? '' : 'display:none'}">Forget Civa token</button>
         </div>
         <script>
           function submit() {
@@ -111,7 +121,7 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
             require('electron').shell.openExternal('https://www.playyourdamnturn.com/user/profile');
           }
           function openCiva() {
-            require('electron').shell.openExternal('https://civa.us');
+            require('electron').shell.openExternal(${JSON.stringify(CIVA_ACCOUNT_URL)});
           }
           function saveCiva() {
             require('electron').ipcRenderer.send('save-civa-token', document.getElementById('civa-input').value);
@@ -261,9 +271,9 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
         });
     };
 
-    const refreshCivaSection = (connectedName: string | null, hasToken: boolean) => {
+    const refreshCivaSection = (connectedName: string | null, hasToken: boolean, problem: string | null = null) => {
       if (!win || win.isDestroyed()) return;
-      const statusHtml = buildCivaStatusHtml(connectedName, hasToken && !connectedName);
+      const statusHtml = buildCivaStatusHtml(connectedName, problem);
       win.webContents.executeJavaScript(`
           const status = document.getElementById('civa-status');
           if (status) status.outerHTML = \`${statusHtml}\`;
@@ -281,15 +291,20 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
       if (!trimmed) {
         return;
       }
-      const player = await validateCivaSession(trimmed);
-      if (!player) {
+      let player;
+      try {
+        player = await whoami(trimmed);
+      } catch (error) {
+        const message = error instanceof CivaAuthError
+          ? 'Civa did not accept that token. Create a new one under Your account → API tokens and paste it again.'
+          : `Could not reach Civa: ${error instanceof Error ? error.message : String(error)}`;
         if (win && !win.isDestroyed()) {
-          win.webContents.executeJavaScript(`alert('Invalid Civa session. Sign in at civa.us and copy the session cookie again.');`);
+          win.webContents.executeJavaScript(`alert(${JSON.stringify(message)});`);
         }
         return;
       }
-      store.set('civaSessionToken', trimmed);
-      console.log(`Civa session saved for ${player.name}`);
+      setCivaApiToken(trimmed);
+      console.log(`Civa token saved for ${player.name}`);
       refreshCivaSection(player.name, true);
       if (onAccountChange) {
         onAccountChange();
@@ -297,7 +312,7 @@ export async function addUser(onAccountChange?: () => void): Promise<boolean> {
     };
 
     const clearCivaHandler = () => {
-      clearCivaSession();
+      clearCivaToken();
       refreshCivaSection(null, false);
       if (onAccountChange) {
         onAccountChange();
