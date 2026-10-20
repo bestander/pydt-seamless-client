@@ -11,21 +11,21 @@ import { axialMapSize } from './coords';
  * schema civa served (test-fixtures/classic-schema.json, refreshed by scripts/capture-schema.mjs). Skipped when
  * no save is present. With CIVA_TEST_URL and CIVA_TEST_TOKEN set it also runs civa's own `inspect` on it.
  */
-const CANDIDATES = [process.env.PYDT_TEST_SAVE, 'e90464e4-3b5c-44f2-babf-f016bd7abb59_158.Civ6Save', '74.Civ6Save', 'turn124.Civ6Save']
+const CANDIDATES = [process.env.PYDT_TEST_SAVE, '74.Civ6Save', 'turn124.Civ6Save']
   .filter((p): p is string => !!p)
   .map(p => (p.includes('/') ? p : join(homedir(), 'Downloads', p)));
 const savePath = CANDIDATES.find(existsSync);
 
 describe('file names', () => {
   it('reads the PYDT game id off a save name', () => {
-    expect(pydtGameIdFromFileName('/x/9b452f7f-ddbe-451d-ab3f-c6017da6ffce_321.Civ6Save')).toBe('9b452f7f-ddbe-451d-ab3f-c6017da6ffce');
+    expect(pydtGameIdFromFileName('/x/00000000-1111-2222-3333-444444444444_321.Civ6Save')).toBe('00000000-1111-2222-3333-444444444444');
     expect(pydtGameIdFromFileName('!GO!-bob-Game.Civ6Save')).toBeUndefined();
   });
 });
 
 (savePath ? describe : describe.skip)('a real save, converted', () => {
   const save = savePath ? parseSave(readFileSync(savePath)) : undefined!;
-  const pydtGameId = '9b452f7f-ddbe-451d-ab3f-c6017da6ffce';
+  const pydtGameId = '00000000-1111-2222-3333-444444444444';
   const result = savePath ? buildEnvelope(save, { schema: classicSchema, pin: { featured: 'classic' }, pydtGameId }) : undefined!;
   const state = result?.envelope.state as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 

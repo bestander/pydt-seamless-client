@@ -61,7 +61,7 @@ Tray menu → **Create game in Civa** → pick a PYDT game that has no Civa mirr
 
 ### What is converted
 
-The save is read with [civ6-savegame-parser](https://github.com/bestander/civ6-savegame-parser) and turned into a Civa snapshot built against the schema and id vocabulary that Civa serves (`GET /api/mirror-games/schema`; cached per ruleset), then checked with Civa's `inspect` before it is posted. Carried: the map (terrain, features, resources, rivers, lakes), cities (buildings, districts, wonders, territory, worked tiles), roads and improvements, units, researched technologies, gold and the seats. Not carried yet (the sync says so in its warnings): civics, governments and policies, religion, governors, great people, production queues, trade routes, diplomacy and fog of war.
+The save is read with [civ6-savegame-parser](https://github.com/bestander/civ6-savegame-parser) (credit to its author; pinned at v0.4.0) and turned into a Civa snapshot built against the schema and id vocabulary that Civa serves (`GET /api/mirror-games/schema`; cached per ruleset), then checked with Civa's `inspect` before it is posted. Carried: the map (terrain, features, resources, rivers, lakes), cities (buildings, districts, wonders, territory, worked tiles), roads and improvements, units, researched technologies, gold and the seats. Not carried yet (the sync says so in its warnings): civics, governments and policies, religion, governors, great people, production queues, trade routes, diplomacy and fog of war.
 
 ### Testing against a local Civa
 
