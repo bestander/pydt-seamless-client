@@ -68,13 +68,27 @@ const BUILDING_ALIASES: Readonly<Record<string, string>> = {
   BUILDING_MARKET: 'MARKETPLACE', BUILDING_MUSEUM_ART: 'ART_MUSEUM', BUILDING_MUSEUM_ARTIFACT: 'ARCHAEOLOGICAL_MUSEUM',
 };
 
-const DISTRICT_ALIASES: Readonly<Record<string, string>> = {
-  DISTRICT_ENTERTAINMENT_COMPLEX: 'ENTERTAINMENT', DISTRICT_THEATER: 'THEATER_SQUARE', DISTRICT_GOVERNMENT: 'GOVERNMENT_PLAZA',
-  // Unique districts stand in for the district they replace.
-  DISTRICT_COTHON: 'HARBOR', DISTRICT_ROYAL_NAVY_DOCKYARD: 'HARBOR', DISTRICT_HANSA: 'INDUSTRIAL_ZONE', DISTRICT_OPPIDUM: 'INDUSTRIAL_ZONE',
-  DISTRICT_LAVRA: 'HOLY_SITE', DISTRICT_SEOWON: 'CAMPUS', DISTRICT_OBSERVATORY: 'CAMPUS', DISTRICT_ACROPOLIS: 'THEATER_SQUARE',
-  DISTRICT_IKANDA: 'ENCAMPMENT', DISTRICT_THANH: 'ENCAMPMENT', DISTRICT_SUGUBA: 'COMMERCIAL_HUB', DISTRICT_STREET_CARNIVAL: 'ENTERTAINMENT',
-  DISTRICT_HIPPODROME: 'ENTERTAINMENT',
+/**
+ * Current district id, then the name a moduleApi 1 ruleset still lists. The first one the vocabulary
+ * contains is used.
+ */
+const DISTRICT_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  DISTRICT_ENTERTAINMENT_COMPLEX: ['ENTERTAINMENT'], DISTRICT_THEATER: ['ARTS_QUARTER', 'THEATER_SQUARE'],
+  DISTRICT_GOVERNMENT: ['ADMIN_QUARTER', 'GOVERNMENT_PLAZA'],
+  DISTRICT_COTHON: ['HARBOR'], DISTRICT_ROYAL_NAVY_DOCKYARD: ['HARBOR'],
+  DISTRICT_HANSA: ['WORKS_QUARTER', 'INDUSTRIAL_ZONE'], DISTRICT_OPPIDUM: ['WORKS_QUARTER', 'INDUSTRIAL_ZONE'],
+  DISTRICT_LAVRA: ['FAITH_QUARTER', 'HOLY_SITE'], DISTRICT_SEOWON: ['LEARNING_QUARTER', 'CAMPUS'],
+  DISTRICT_OBSERVATORY: ['LEARNING_QUARTER', 'CAMPUS'], DISTRICT_ACROPOLIS: ['ARTS_QUARTER', 'THEATER_SQUARE'],
+  DISTRICT_IKANDA: ['MILITARY_QUARTER', 'ENCAMPMENT'], DISTRICT_THANH: ['MILITARY_QUARTER', 'ENCAMPMENT'],
+  DISTRICT_SUGUBA: ['TRADE_QUARTER', 'COMMERCIAL_HUB'], DISTRICT_STREET_CARNIVAL: ['ENTERTAINMENT'],
+  DISTRICT_HIPPODROME: ['ENTERTAINMENT'],
+};
+
+/** Bare district id after `DISTRICT_` is stripped, when the current name differs. */
+const DISTRICT_CURRENT: Readonly<Record<string, string>> = {
+  THEATER: 'ARTS_QUARTER', THEATER_SQUARE: 'ARTS_QUARTER', GOVERNMENT: 'ADMIN_QUARTER', GOVERNMENT_PLAZA: 'ADMIN_QUARTER',
+  INDUSTRIAL_ZONE: 'WORKS_QUARTER', HOLY_SITE: 'FAITH_QUARTER', CAMPUS: 'LEARNING_QUARTER',
+  ENCAMPMENT: 'MILITARY_QUARTER', COMMERCIAL_HUB: 'TRADE_QUARTER', PRESERVE: 'NATURE_RESERVE',
 };
 
 /** Wonders whose building name is not the civa id with `BUILDING_` stripped. */
@@ -126,10 +140,25 @@ export function displayName(id: string, prefix: string): string {
 
 /** Resolves external names to ids the targeted ruleset lists. Each method returns undefined when there is no match. */
 export class Mapper {
+  readonly vocabulary: RulesetVocabulary;
   private readonly sets: { [K in keyof RulesetVocabulary]: Set<string> };
 
-  constructor(readonly vocabulary: RulesetVocabulary) {
-    this.sets = Object.fromEntries(Object.entries(vocabulary).map(([k, v]) => [k, new Set(v as string[])])) as typeof this.sets;
+  constructor(vocabulary: RulesetVocabulary) {
+    const regents = vocabulary.regents ?? vocabulary.governors ?? [];
+    const regentPromotions = vocabulary.regentPromotions ?? vocabulary.governorPromotions ?? [];
+    this.vocabulary = {
+      ...vocabulary,
+      regents,
+      regentPromotions,
+      governors: vocabulary.governors ?? regents,
+      governorPromotions: vocabulary.governorPromotions ?? regentPromotions,
+    };
+    this.sets = Object.fromEntries(Object.entries(this.vocabulary).map(([k, v]) => [k, new Set((v ?? []) as string[])])) as typeof this.sets;
+  }
+
+  /** The first candidate the targeted ruleset lists. */
+  private listed(group: keyof RulesetVocabulary, ids: readonly string[]): string | undefined {
+    return ids.find(id => this.has(group, id));
   }
 
   has(group: keyof RulesetVocabulary, id: string): boolean {
@@ -173,8 +202,14 @@ export class Mapper {
   }
 
   district(name: string): string | undefined {
-    const id = DISTRICT_ALIASES[name] ?? name.replace(/^DISTRICT_/, '');
-    return this.has('districts', id) ? id : undefined;
+    const aliases = DISTRICT_ALIASES[name];
+    if (aliases) {
+      const hit = this.listed('districts', aliases);
+      if (hit) return hit;
+    }
+    const bare = name.replace(/^DISTRICT_/, '');
+    const current = DISTRICT_CURRENT[bare];
+    return this.listed('districts', current ? [current, bare] : [bare]);
   }
 
   /** A wonder id: the ruleset's own `classic_*` variant when it lists one, otherwise the plain slug. */

@@ -1,6 +1,6 @@
 {
   "name": "pydt-mini",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Minimalist desktop application for PYDT integration",
   "main": "dist/main.js",
   "scripts": {

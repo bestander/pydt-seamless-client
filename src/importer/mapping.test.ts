@@ -36,6 +36,9 @@ describe('external names → ids the ruleset lists', () => {
     expect(mapper.building('BUILDING_PYRAMIDS')).toBeUndefined();
     expect(mapper.wonder('BUILDING_PYRAMIDS')).toMatch(/pyramids$/);
     expect(mapper.district('DISTRICT_THEATER')).toBe('THEATER_SQUARE');
+    const current = new Mapper({ ...classicSchema.vocabulary, districts: ['ARTS_QUARTER', 'LEARNING_QUARTER', 'HARBOR'] });
+    expect(current.district('DISTRICT_THEATER')).toBe('ARTS_QUARTER');
+    expect(current.district('DISTRICT_CAMPUS')).toBe('LEARNING_QUARTER');
     expect(mapper.tech('TECH_THE_WHEEL')).toBe('WHEEL');
     expect(mapper.tech('TECH_MINING')).toBe('MINING');
     expect(mapper.route(0)).toBe('ROAD');

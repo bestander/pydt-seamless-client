@@ -20,8 +20,12 @@ export interface RulesetVocabulary {
   techs: string[];
   civics: string[];
   governments: string[];
-  governors: string[];
-  governorPromotions: string[];
+  /** Previous name for `regents`. Present through the one-release alias. */
+  governors?: string[];
+  /** Previous name for `regentPromotions`. */
+  governorPromotions?: string[];
+  regents?: string[];
+  regentPromotions?: string[];
   promotions: string[];
   policyCards: string[];
   beliefs: string[];
