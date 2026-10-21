@@ -162,7 +162,7 @@ export class Mapper {
   }
 
   has(group: keyof RulesetVocabulary, id: string): boolean {
-    return this.sets[group].has(id);
+    return this.sets[group]?.has(id) ?? false;
   }
 
   terrain(name: string | null): { type: string | undefined; form: string | null } {
