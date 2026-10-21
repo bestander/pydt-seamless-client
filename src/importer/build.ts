@@ -406,7 +406,9 @@ export function buildEnvelope(save: Civ6Save, options: BuildOptions): BuildResul
     formatVersion: options.schema.formatVersion,
     ...(options.pin ? { ruleset: options.pin } : {}),
     sourceTurn: save.metadata.turn,
-    fingerprint: { mapWidth: size, mapHeight: size, seats: seatFingerprint(seats), pydtGameId: options.pydtGameId },
+    // The source grid, not the axial square. Mirrors created by the server importer stored width×height
+    // (74×46 for this map) and a later turn must name the same map.
+    fingerprint: { mapWidth: dims.width, mapHeight: dims.height, seats: seatFingerprint(seats), pydtGameId: options.pydtGameId },
     seats: seats.map(s => ({
       index: s.index,
       civilizationName: s.civilizationName,

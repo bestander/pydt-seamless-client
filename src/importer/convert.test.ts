@@ -4,8 +4,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildEnvelope, parseSave, pydtGameIdFromFileName, validateEnvelope } from './index';
 import { classicSchema } from './mapping.test';
-import { axialMapSize } from './coords';
-
 /**
  * Converts a real save from ~/Downloads (as the old importer's tests did) and checks the result against the
  * schema civa served (test-fixtures/classic-schema.json, refreshed by scripts/capture-schema.mjs). Skipped when
@@ -35,8 +33,7 @@ describe('file names', () => {
 
   it('fills the fingerprint, seats and source turn', () => {
     const env = result.envelope as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const size = axialMapSize({ width: save.map.width, height: save.map.height });
-    expect(env.fingerprint).toMatchObject({ mapWidth: size, mapHeight: size, pydtGameId });
+    expect(env.fingerprint).toMatchObject({ mapWidth: save.map.width, mapHeight: save.map.height, pydtGameId });
     expect(env.fingerprint.seats).toHaveLength(result.seats.length);
     expect(env.seats.map((s: any) => s.index)).toEqual(result.seats.map(s => s.index)); // eslint-disable-line @typescript-eslint/no-explicit-any
     expect(env.sourceTurn).toBe(save.metadata.turn);
