@@ -9,15 +9,46 @@ const { exec } = require('child_process');
 
 const APP_NAME = 'pydt-mini.app';
 const VERSION = require('./package.json').version;
-const RELEASE_URL = `https://github.com/bestander/pydt-seamless-client/releases/download/${VERSION}/pydt-mini-${VERSION}-arm64-mac.zip`;
+const ZIP_NAME = `pydt-mini-${VERSION}-arm64-mac.zip`;
+const RELEASE_PAGE = `https://github.com/bestander/pydt-seamless-client/releases/tag/${VERSION}`;
+const RELEASE_URL = `https://github.com/bestander/pydt-seamless-client/releases/download/${VERSION}/${ZIP_NAME}`;
 const INSTALL_DIR = path.join(os.homedir(), 'Applications');
 
+function missingRelease() {
+  const message = [
+    `The app zip is not on the GitHub release for ${VERSION}.`,
+    `Missing file: ${ZIP_NAME}`,
+    `Looked at: ${RELEASE_URL}`,
+    '',
+    'Fix it by publishing that zip on the release, then run this installer again:',
+    `  1. In pydt-seamless-client, build the mac app (npm run build:mac).`,
+    `  2. Create a GitHub release tagged ${VERSION} with no "v" prefix.`,
+    `     The tag has to match this installer version. Release page: ${RELEASE_PAGE}`,
+    `  3. Upload release/${ZIP_NAME} and name the asset exactly ${ZIP_NAME}.`,
+    '  4. Run: npx pydt-mini-installer',
+  ].join('\n');
+  console.error(message);
+  process.exit(1);
+}
+
 async function downloadFile(url, outputPath) {
-  const response = await axios({
-    method: 'GET',
-    url: url,
-    responseType: 'arraybuffer'
-  });
+  let response;
+  try {
+    response = await axios({
+      method: 'GET',
+      url: url,
+      responseType: 'arraybuffer',
+      validateStatus: () => true,
+    });
+  } catch (error) {
+    const status = error.response && error.response.status;
+    if (status === 404) missingRelease();
+    throw error;
+  }
+  if (response.status === 404) missingRelease();
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Download failed (${response.status}) from ${url}`);
+  }
   await fs.writeFile(outputPath, response.data);
 }
 

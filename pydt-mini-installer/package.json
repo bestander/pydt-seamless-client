@@ -4,7 +4,8 @@
   "description": "One-line installer for PYDT Mini desktop application",
   "main": "install.js",
   "bin": {
-    "pydt-mini-install": "./install.js"
+    "pydt-mini-install": "./install.js",
+    "pydt-mini-installer": "./install.js"
   },
   "files": [
     "install.js"
