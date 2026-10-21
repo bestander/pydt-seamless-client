@@ -116,8 +116,9 @@ export async function lookupMirror(token: string, pydtGameId: string): Promise<M
 }
 
 /** Add a turn to the existing mirror of a PYDT game. No `create`: a game that is not mirrored answers 404. */
-export async function postTurn(token: string, pydtGameId: string, envelope: unknown): Promise<{ gameId: string; sourceTurn: number }> {
-  const { body } = await civaRequest<{ gameId: string; sourceTurn: number }>(token, 'POST', `/mirror-games/by-source/${encodeURIComponent(pydtGameId)}/turns`, envelope);
+export async function postTurn(token: string, pydtGameId: string, envelope: unknown, replace = false): Promise<{ gameId: string; sourceTurn: number }> {
+  const query = replace ? '?replace=1' : '';
+  const { body } = await civaRequest<{ gameId: string; sourceTurn: number }>(token, 'POST', `/mirror-games/by-source/${encodeURIComponent(pydtGameId)}/turns${query}`, envelope);
   return body;
 }
 

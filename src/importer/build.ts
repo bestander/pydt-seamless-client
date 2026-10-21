@@ -178,6 +178,58 @@ function playerConfig(id: string, civ: { civilizationId: string; country: string
 /** `ai_pydt_seat_0`: a stable AI id per seat. Civa swaps it for the account when a seat is claimed. */
 export const seatPlayerId = (seatIndex: number): string => `ai_pydt_seat_${seatIndex}`;
 
+/**
+ * Fog as the save has it. Each seat remembers every plot it has revealed, plus the plots of allies
+ * and teammates, and those pairs share live sight. Plot indices are the source grid.
+ */
+export function fogOfWar(
+  save: Civ6Save,
+  dims: MapDims,
+  map: MapTileOut[][],
+  slotToPlayerId: ReadonlyMap<number, string>,
+): { visitedTilesByPlayer: Record<string, Array<MapTileOut & { position: Position }>>; visionPartners: Record<string, string[]>; pairs: number } {
+  const partnersOf = new Map<number, Set<number>>();
+  const pair = (a: number, b: number) => {
+    if (a === b) return;
+    if (!partnersOf.has(a)) partnersOf.set(a, new Set());
+    if (!partnersOf.has(b)) partnersOf.set(b, new Set());
+    partnersOf.get(a)!.add(b);
+    partnersOf.get(b)!.add(a);
+  };
+  for (const alliance of save.alliances ?? []) pair(alliance.a, alliance.b);
+  for (const player of save.players) {
+    for (const relation of player.relations ?? []) {
+      if (relation.state === 'ALLIED' && relation.playerId !== player.playerId) pair(player.playerId, relation.playerId);
+    }
+  }
+  const revealedOf = new Map(save.players.map(p => [p.playerId, new Set(p.revealedPlots ?? [])]));
+  const visitedTilesByPlayer: Record<string, Array<MapTileOut & { position: Position }>> = {};
+  for (const [slot, playerId] of slotToPlayerId) {
+    const revealed = new Set(revealedOf.get(slot) ?? []);
+    for (const partner of partnersOf.get(slot) ?? []) {
+      for (const index of revealedOf.get(partner) ?? []) revealed.add(index);
+    }
+    const tiles: Array<MapTileOut & { position: Position }> = [];
+    for (const index of revealed) {
+      const axial = toAxial(index % dims.width, Math.floor(index / dims.width), dims);
+      const tile = map[axial.y]?.[axial.x];
+      if (!tile) continue;
+      tiles.push({ ...tile, position: axial });
+    }
+    if (tiles.length > 0) visitedTilesByPlayer[playerId] = tiles;
+  }
+  const visionPartners: Record<string, string[]> = {};
+  let pairs = 0;
+  for (const [slot, partners] of partnersOf) {
+    const id = slotToPlayerId.get(slot);
+    if (!id) continue;
+    const others = [...partners].map(p => slotToPlayerId.get(p)).filter((p): p is string => !!p && p !== id);
+    if (others.length > 0) visionPartners[id] = others;
+    for (const other of partners) if (slot < other && slotToPlayerId.has(other)) pairs++;
+  }
+  return { visitedTilesByPlayer, visionPartners, pairs };
+}
+
 export function buildEnvelope(save: Civ6Save, options: BuildOptions): BuildResult {
   const mapper = new Mapper(options.schema.vocabulary);
   const unmapped: Unmapped = {};
@@ -394,7 +446,12 @@ export function buildEnvelope(save: Civ6Save, options: BuildOptions): BuildResul
     currentResearch,
     researchProgress,
   };
-  const notCarried = 'civics, governments, policy cards, religion, governors, great people, production, trade routes, diplomacy and fog of war are not carried yet';
+  const fog = fogOfWar(save, dims, map, slotToPlayerId);
+  if (Object.keys(fog.visitedTilesByPlayer).length > 0) state.visitedTilesByPlayer = fog.visitedTilesByPlayer;
+  if (Object.keys(fog.visionPartners).length > 0) state.visionPartners = fog.visionPartners;
+  if (fog.pairs > 0) warnings.push(`${fog.pairs} alliance/team pair(s) share visibility`);
+
+  const notCarried = 'civics, governments, policy cards, religion, governors, great people, production, trade routes and diplomacy are not carried yet';
   warnings.push(notCarried);
   for (const [bucket, names] of Object.entries(unmapped)) {
     const entries = Object.entries(names);

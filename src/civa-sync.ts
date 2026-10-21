@@ -31,7 +31,7 @@ export function describeProblem(error: unknown): string {
  * A game that is not mirrored is not an error here (`not-mirrored`): creating it is the user's choice, from
  * the "Create in Civa" action. Any other failure throws; a revoked token throws CivaAuthError.
  */
-export async function syncTurnToCiva(token: string, pydtGameId: string, saveBuffer: Buffer, gameName?: string): Promise<SyncOutcome> {
+export async function syncTurnToCiva(token: string, pydtGameId: string, saveBuffer: Buffer, gameName?: string, replace = false): Promise<SyncOutcome> {
   const lookup = await civaMirrorView(token, pydtGameId);
   if (!lookup) return { kind: 'not-mirrored' };
   const pin = pinOfMirror(lookup.view);
@@ -41,7 +41,7 @@ export async function syncTurnToCiva(token: string, pydtGameId: string, saveBuff
   if (!inspection.rulesets.some(r => r.ok)) {
     throw new CivaSyncError(`Civa cannot load this turn under any ruleset: ${inspection.rulesets.map(r => `${r.label}: ${r.error ?? 'no'}`).join('; ')}`);
   }
-  const posted = await postTurn(token, pydtGameId, built.envelope);
+  const posted = await postTurn(token, pydtGameId, built.envelope, replace);
   return { kind: 'uploaded', gameId: posted.gameId, turn: posted.sourceTurn };
 }
 
